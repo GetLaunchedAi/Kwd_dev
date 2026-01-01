@@ -1,0 +1,47 @@
+{
+  "name": "clickup-cursor-tool",
+  "version": "1.0.0",
+  "description": "Automated workflow tool that receives ClickUp tasks, triggers Cursor agent, and manages approval workflow",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "clickup",
+    "cursor",
+    "automation",
+    "workflow"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@slack/webhook": "^7.0.6",
+    "axios": "^1.6.2",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "fs-extra": "^11.2.0",
+    "nodemailer": "^7.0.12",
+    "simple-git": "^3.20.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20.10.5",
+    "@types/nodemailer": "^6.4.14",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
+
+
+
+
+
+
+
+
+

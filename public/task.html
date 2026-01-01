@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Details - ClickUp to Cursor Workflow</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="/" class="back-link">← Back to Dashboard</a>
+            <h1>Task Details</h1>
+        </header>
+
+        <div id="loading" class="loading">Loading task details...</div>
+        <div id="error" class="error hidden"></div>
+
+        <div id="taskDetails" class="hidden">
+            <!-- Task Info Section -->
+            <section class="task-info-section">
+                <div class="task-header">
+                    <div>
+                        <h2 id="taskName"></h2>
+                        <span id="taskState" class="state-badge"></span>
+                    </div>
+                    <div class="flex gap-md flex-center">
+                        <div class="auto-refresh-indicator hidden" id="autoRefreshIndicator">
+                            <div class="auto-refresh-dot"></div>
+                            <span>Auto-updating</span>
+                        </div>
+                        <div class="agent-trigger-wrapper">
+                            <button id="triggerAgentBtn" class="btn btn-primary">🤖 Trigger Cursor Agent</button>
+                            <div id="agentStatus" class="agent-status-hint hidden"></div>
+                        </div>
+                        <button id="refreshTaskBtn" class="btn btn-secondary">Refresh</button>
+                    </div>
+                </div>
+                <div class="task-meta">
+                    <div class="meta-item">
+                        <strong>Task ID:</strong> <span id="taskId"></span>
+                    </div>
+                    <div class="meta-item">
+                        <strong>Client:</strong> <span id="clientName"></span>
+                    </div>
+                    <div class="meta-item">
+                        <strong>Branch:</strong> <code id="branchName"></code>
+                        <button class="copy-btn" data-copy-target="branchName" title="Copy branch name">📋</button>
+                    </div>
+                    <div class="meta-item">
+                        <strong>ClickUp:</strong> <a id="clickUpUrl" href="#" target="_blank">View in ClickUp</a>
+                    </div>
+                    <div class="meta-item">
+                        <strong>Created:</strong> <span id="createdAt"></span>
+                    </div>
+                    <div class="meta-item">
+                        <strong>Updated:</strong> <span id="updatedAt"></span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress Timeline Section -->
+            <section id="timelineSection" class="task-description-section hidden">
+                <h3>Workflow Progress</h3>
+                <div id="timeline" class="timeline"></div>
+            </section>
+
+            <!-- Description Section -->
+            <section class="task-description-section">
+                <div class="flex flex-between flex-center mb-sm">
+                    <h3>Description</h3>
+                    <button id="editDescriptionBtn" class="btn btn-secondary btn-sm">Edit Description</button>
+                </div>
+                <div id="taskDescription" class="description-content"></div>
+                <div id="editDescriptionContainer" class="hidden">
+                    <textarea id="editDescriptionInput" class="description-textarea"></textarea>
+                    <div class="flex gap-md mt-sm">
+                        <button id="saveDescriptionBtn" class="btn btn-primary btn-sm">Save</button>
+                        <button id="cancelDescriptionBtn" class="btn btn-secondary btn-sm">Cancel</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Changes Summary Section -->
+            <section class="changes-summary-section">
+                <h3>Changes Summary</h3>
+                <div id="changesSummary" class="changes-summary">
+                    <div class="loading">Loading changes...</div>
+                </div>
+            </section>
+
+            <!-- Diff Viewer Section -->
+            <section class="diff-viewer-section">
+                <div class="diff-header">
+                    <h3>Code Changes</h3>
+                    <div class="diff-controls">
+                        <button id="downloadDiffBtn" class="btn btn-secondary">Download Patch</button>
+                        <button id="expandAllBtn" class="btn btn-secondary">Expand All</button>
+                        <button id="collapseAllBtn" class="btn btn-secondary">Collapse All</button>
+                    </div>
+                </div>
+                <div id="diffViewer" class="diff-viewer">
+                    <div class="loading">Loading diff...</div>
+                </div>
+            </section>
+
+            <!-- Approval Section -->
+            <section id="approvalSection" class="approval-section hidden">
+                <h3>Approval</h3>
+                <div class="approval-actions">
+                    <button id="approveBtn" class="btn btn-success">✅ Approve Changes</button>
+                    <button id="rejectBtn" class="btn btn-danger">❌ Reject Changes</button>
+                </div>
+            </section>
+
+            <!-- Error Section -->
+            <section id="errorSection" class="task-description-section hidden">
+                <h3>Error Details</h3>
+                <div id="errorDetails" class="description-content error-content"></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Approval Modal -->
+    <div id="approveModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Approve Changes</h3>
+                <button class="modal-close" id="closeApproveModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to approve these changes? They will be pushed to GitHub.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelApproveBtn">Cancel</button>
+                <button class="btn btn-success" id="confirmApproveBtn">Approve</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rejection Modal -->
+    <div id="rejectModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Reject Changes</h3>
+                <button class="modal-close" id="closeRejectModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Please provide a reason for rejecting these changes (optional):</p>
+                <textarea id="rejectReason" class="modal-textarea" placeholder="Reason for rejection..."></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelRejectBtn">Cancel</button>
+                <button class="btn btn-danger" id="confirmRejectBtn">Reject</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="utils/formatting.js"></script>
+    <script src="utils/diff.js"></script>
+    <script src="task.js"></script>
+</body>
+</html>
+

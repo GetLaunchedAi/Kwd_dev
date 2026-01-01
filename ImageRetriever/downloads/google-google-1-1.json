@@ -1,0 +1,22 @@
+{
+  "query": "red apple",
+  "shape": "square",
+  "relatedText": "a single fresh red apple on a white background",
+  "provider": "google",
+  "photographer": "www.walmart.com",
+  "photoUrl": "https://www.walmart.com/ip/Fresh-Red-Delicious-Apple-Each/45912954",
+  "filename": "google-google-1-1.jpeg",
+  "dimensions": {
+    "width": 3000,
+    "height": 3000
+  },
+  "scores": {
+    "relevance": 100,
+    "cropFit": 100,
+    "quality": 100,
+    "safety": 100,
+    "final": 100
+  },
+  "turnNumber": 1,
+  "downloadedAt": "2026-01-01T03:58:14.236Z"
+}

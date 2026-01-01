@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Clone All - Web UI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 GitHub Clone All</h1>
+            <p>Clone all repositories from a GitHub account with ease</p>
+        </header>
+
+        <main>
+            <form id="cloneForm" class="form-card">
+                <div class="form-group">
+                    <label for="username">GitHub Username or Organization</label>
+                    <input type="text" id="username" name="username" placeholder="octocat" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="token">GitHub Personal Access Token</label>
+                    <div class="token-input-group">
+                        <input type="password" id="token" name="token" placeholder="ghp_xxxxxxxxxxxx" required>
+                        <button type="button" id="testTokenBtn" class="btn-secondary">Test Token</button>
+                    </div>
+                    <small class="help-text">
+                        <a href="https://github.com/settings/tokens" target="_blank">Get a token here</a> 
+                        (requires: repo scope for private repos, read:org for organizations)
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label for="directory">Target Directory</label>
+                    <input type="text" id="directory" name="directory" placeholder="./repos" value="./repos">
+                    <small class="help-text" id="directoryHelp">Directory where repositories will be cloned</small>
+                    <small class="help-text" id="resolvedPath" style="display: none; color: #667eea; font-weight: 600;"></small>
+                </div>
+
+                <div class="form-group">
+                    <label for="filter">Filter by Name (Optional)</label>
+                    <input type="text" id="filter" name="filter" placeholder="website">
+                    <small class="help-text">Only clone repos containing this text in their name</small>
+                </div>
+
+                <div class="checkbox-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="includePrivate" name="includePrivate">
+                        <span>Include private repositories</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="useSSH" name="useSSH">
+                        <span>Use SSH URLs instead of HTTPS</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="updateExisting" name="updateExisting" checked>
+                        <span>Update existing repositories (pull latest changes)</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="submitBtn" class="btn-primary">
+                    Start Cloning
+                </button>
+            </form>
+
+            <div id="progressSection" class="progress-section hidden">
+                <h2>Progress</h2>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                    <span class="progress-text" id="progressText">0%</span>
+                </div>
+                <div id="progressLog" class="progress-log"></div>
+            </div>
+
+            <div id="resultSection" class="result-section hidden">
+                <h2>Results</h2>
+                <div id="resultContent" class="result-content"></div>
+            </div>
+        </main>
+
+        <div id="tokenTestResult" class="token-test-result hidden"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
+

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Retriever Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center text-blue-600 mb-8">Image Retriever Tool</h1>
+        
+        <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
+            <form id="retrieveForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Search Query</label>
+                    <input type="text" id="query" name="query" required 
+                        placeholder="e.g. sunset beach"
+                        class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Image Shape</label>
+                    <select id="shape" name="shape" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        <option value="landscape">Landscape</option>
+                        <option value="portrait">Portrait</option>
+                        <option value="square">Square</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Context (Related Text)</label>
+                    <textarea id="context" name="context" required
+                        placeholder="e.g. A blog post about summer vacation on a tropical island"
+                        class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 h-24"></textarea>
+                </div>
+                
+                <button type="submit" id="submitBtn"
+                    class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition duration-200">
+                    Retrieve Image
+                </button>
+            </form>
+        </div>
+
+        <div id="loading" class="hidden mt-8 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <p class="mt-2 text-gray-600">Searching and qualifying images... This may take a moment.</p>
+        </div>
+
+        <div id="result" class="hidden mt-8 max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
+            <h2 id="resultTitle" class="text-2xl font-bold mb-4">Best Match Found</h2>
+            <div id="bestMatch" class="flex flex-col md:flex-row gap-6 mb-8">
+                <div class="flex-1">
+                    <img id="resultImage" src="" alt="Result" class="w-full rounded-lg shadow-sm" onerror="this.onerror=null; this.src='https://via.placeholder.com/800x600?text=Image+Load+Failed';">
+                </div>
+                <div class="flex-1 space-y-4">
+                    <div>
+                        <h3 class="font-bold text-gray-700">Metadata</h3>
+                        <p class="text-sm">Provider: <span id="resProvider" class="font-mono"></span></p>
+                        <p class="text-sm">Photographer: <span id="resPhotographer"></span></p>
+                        <p id="resAiVerified" class="text-sm text-green-600 font-bold hidden">✓ AI Visual Verified</p>
+                        <p class="text-sm text-blue-600">
+                            <a id="resLink" href="#" target="_blank" class="hover:underline">View Original</a>
+                            <span class="mx-2 text-gray-400">|</span>
+                            <a id="downloadLink" href="#" download class="hover:underline font-bold">Download Local Copy</a>
+                        </p>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-gray-700">Scores</h3>
+                        <div class="grid grid-cols-2 gap-2 text-sm mt-1">
+                            <div>Final: <span id="scoreFinal" class="font-bold"></span></div>
+                            <div>Relevance: <span id="scoreRelevance"></span></div>
+                            <div>Crop Fit: <span id="scoreCrop"></span></div>
+                            <div>Safety: <span id="scoreSafety"></span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="optionsContainer" class="mt-8 border-t pt-8">
+                <h3 class="text-xl font-bold mb-4 text-gray-700">Alternative Options Considered</h3>
+                <div id="optionsGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <!-- Options will be injected here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="error" class="hidden mt-8 max-w-2xl mx-auto bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+            <p id="errorMsg"></p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('retrieveForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const resultDiv = document.getElementById('result');
+        const errorDiv = document.getElementById('error');
+        const errorMsg = document.getElementById('errorMsg');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // UI Reset
+            resultDiv.classList.add('hidden');
+            errorDiv.classList.add('hidden');
+            loading.classList.remove('hidden');
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50');
+
+            const formData = {
+                query: document.getElementById('query').value,
+                shape: document.getElementById('shape').value,
+                context: document.getElementById('context').value
+            };
+
+            try {
+                const response = await fetch('/api/retrieve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                const data = await response.json();
+
+                if (data.success || data.options) {
+                    if (data.success) {
+                        document.getElementById('resultTitle').textContent = 'Best Match Found';
+                        document.getElementById('resultImage').src = data.imageUrl;
+                        document.getElementById('downloadLink').href = data.imageUrl;
+                        document.getElementById('resProvider').textContent = data.image.provider;
+                        document.getElementById('resPhotographer').textContent = data.image.photographer;
+                        document.getElementById('resLink').href = data.image.photoUrl;
+                        
+                        const aiVerifiedBadge = document.getElementById('resAiVerified');
+                        if (data.image.aiVerified) {
+                            aiVerifiedBadge.classList.remove('hidden');
+                        } else {
+                            aiVerifiedBadge.classList.add('hidden');
+                        }
+                        
+                        document.getElementById('scoreFinal').textContent = data.image.scores.final;
+                        document.getElementById('scoreRelevance').textContent = data.image.scores.relevance;
+                        document.getElementById('scoreCrop').textContent = data.image.scores.cropFit;
+                        document.getElementById('scoreSafety').textContent = data.image.scores.safety;
+                        
+                        document.getElementById('bestMatch').classList.remove('hidden');
+                    } else {
+                        document.getElementById('resultTitle').textContent = 'No Perfect Match Found';
+                        document.getElementById('bestMatch').classList.add('hidden');
+                    }
+
+                    // Render options
+                    const optionsGrid = document.getElementById('optionsGrid');
+                    optionsGrid.innerHTML = '';
+                    
+                    if (data.options && data.options.length > 0) {
+                        data.options.forEach(opt => {
+                            const isSelected = data.success && opt.id === data.image.id && opt.provider === data.image.provider;
+                            const card = document.createElement('div');
+                            card.className = `flex flex-col rounded border ${isSelected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'} overflow-hidden bg-gray-50`;
+                            
+                            card.innerHTML = `
+                                <div class="relative aspect-square overflow-hidden group">
+                                    <img src="${opt.thumbnailUrl}" alt="${opt.description || 'Option'}" class="w-full h-full object-cover transition duration-300 group-hover:scale-110">
+                                    <div class="absolute bottom-0 right-0 bg-black/60 text-white text-[10px] px-1">${opt.provider}</div>
+                                    ${opt.aiVerified ? '<div class="absolute top-0 right-0 bg-green-500 text-white text-[10px] px-1 rounded-bl shadow-sm">AI Verified</div>' : ''}
+                                </div>
+                                <div class="p-2 text-[10px] space-y-1">
+                                    <div class="font-bold flex justify-between">
+                                        <span>Score: ${opt.scores.final}</span>
+                                        <span class="${opt.passesThreshold ? 'text-green-600' : 'text-red-600'}">${opt.passesThreshold ? 'PASS' : 'FAIL'}</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-x-2 text-[8px] text-gray-400">
+                                        <div>Rel: ${opt.scores.relevance}</div>
+                                        <div>Crop: ${opt.scores.cropFit}</div>
+                                        <div>Safe: ${opt.scores.safety}</div>
+                                    </div>
+                                    <div class="text-gray-500 truncate">${opt.photographer}</div>
+                                    <a href="${opt.photoUrl}" target="_blank" class="text-blue-600 hover:underline block truncate">Original</a>
+                                </div>
+                            `;
+                            optionsGrid.appendChild(card);
+                        });
+                    }
+
+                    resultDiv.classList.remove('hidden');
+                } else {
+                    errorMsg.textContent = data.message || data.error || 'Failed to retrieve image.';
+                    errorDiv.classList.remove('hidden');
+                }
+            } catch (err) {
+                errorMsg.textContent = 'An unexpected error occurred.';
+                errorDiv.classList.remove('hidden');
+            } finally {
+                loading.classList.add('hidden');
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('opacity-50');
+            }
+        });
+    </script>
+</body>
+</html>
+

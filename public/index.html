@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClickUp to Cursor Workflow Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 ClickUp to Cursor Workflow Dashboard</h1>
+            <div class="header-actions">
+                <div class="header-actions-group">
+                    <div id="connectionStatus" class="connection-status">
+                        <span class="status-indicator status-offline" id="statusIndicator"></span>
+                        <span id="statusText">Checking connection...</span>
+                    </div>
+                    <div class="auto-refresh-indicator hidden" id="autoRefreshIndicator">
+                        <div class="auto-refresh-dot"></div>
+                        <span>Auto-refreshing</span>
+                    </div>
+                    <button id="pauseRefreshBtn" class="btn btn-secondary hidden">Pause</button>
+                </div>
+                <div class="header-actions-group">
+                    <button id="importTaskBtn" class="btn btn-secondary">Import Task</button>
+                    <button id="importIncompleteBtn" class="btn btn-secondary">Add All Incomplete Tasks</button>
+                    <button id="failedImportsBtn" class="btn btn-secondary">Failed Imports <span id="failedImportsCount" class="badge hidden">0</span></button>
+                    <a href="/mappings.html" class="btn btn-secondary">Mappings</a>
+                    <button id="deleteAllTasksBtn" class="btn btn-danger">Delete All Tasks</button>
+                </div>
+                <div class="header-actions-group">
+                    <button id="refreshBtn" class="btn btn-primary">Refresh</button>
+                </div>
+            </div>
+        </header>
+
+        <div id="loading" class="loading">
+            <div class="skeleton-card skeleton-card-spacing">
+                <div class="skeleton skeleton-title"></div>
+                <div class="skeleton skeleton-text"></div>
+                <div class="skeleton skeleton-text"></div>
+                <div class="skeleton skeleton-text skeleton-width-80"></div>
+            </div>
+        </div>
+        <div id="error" class="error hidden">
+            <div id="errorMessage" class="error-message"></div>
+            <button id="retryBtn" class="btn btn-primary">Retry</button>
+        </div>
+
+        <div id="tasksContainer" class="tasks-container hidden">
+            <div class="tasks-header">
+                <select id="filterSelect" class="filter-select">
+                    <option value="all">All Tasks</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="awaiting_approval">Awaiting Approval</option>
+                    <option value="testing">Testing</option>
+                    <option value="completed">Completed</option>
+                </select>
+            </div>
+            <div class="search-sort-container">
+                <input type="text" id="searchInput" class="search-input" placeholder="Search tasks by name, ID, or client...">
+                <select id="sortSelect" class="sort-select">
+                    <option value="updated_desc">Recently Updated</option>
+                    <option value="updated_asc">Oldest Updated</option>
+                    <option value="created_desc">Recently Created</option>
+                    <option value="created_asc">Oldest Created</option>
+                    <option value="name_asc">Name (A-Z)</option>
+                    <option value="name_desc">Name (Z-A)</option>
+                    <option value="client_asc">Client (A-Z)</option>
+                    <option value="state_asc">State</option>
+                </select>
+            </div>
+            <div id="tasksList" class="tasks-list"></div>
+            <div id="emptyState" class="empty-state hidden">
+                <div class="empty-state-icon">📋</div>
+                <div class="empty-state-title">No tasks found</div>
+                <div class="empty-state-message">Try adjusting your search or filter criteria</div>
+            </div>
+            
+            <!-- All Tasks Section (Grouped by Client) -->
+            <div id="allTasksSection" class="all-tasks-section hidden mt-4xl">
+                <div class="tasks-header">
+                    <h2>All Tasks (Grouped by Client)</h2>
+                </div>
+                <div id="allTasksList" class="all-tasks-list"></div>
+                <div id="allTasksEmptyState" class="empty-state hidden">
+                    <div class="empty-state-icon">📋</div>
+                    <div class="empty-state-title">No tasks in All Tasks section</div>
+                    <div class="empty-state-message">Click "Add All Incomplete Tasks" to import tasks from ClickUp</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Task Modal -->
+    <div id="importModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Import Task from ClickUp</h3>
+                <button class="modal-close" id="closeImportModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Enter the ClickUp task ID to import it into the dashboard.</p>
+                <p class="text-hint">
+                    You can find the task ID in the ClickUp task URL. For example, if the URL is 
+                    <code>https://app.clickup.com/t/12345678/abc-123</code>, the task ID is <code>12345678</code>.
+                </p>
+                
+                <div class="form-group">
+                    <label for="taskIdInput">Task ID:</label>
+                    <input type="text" id="taskIdInput" class="modal-input" placeholder="e.g., 86b7yt9z5">
+                </div>
+                
+                <div class="form-group">
+                    <label for="clientNameInput">Client Name (optional):</label>
+                    <input type="text" id="clientNameInput" class="modal-input" placeholder="e.g., acme-corp (leave empty to auto-detect)">
+                    <small class="text-hint">Override auto-detection by specifying a client name</small>
+                </div>
+                
+                <div class="form-group-sm">
+                    <label>
+                        <input type="checkbox" id="triggerWorkflowCheckbox">
+                        Start workflow if status matches trigger status
+                    </label>
+                </div>
+
+                <!-- Preview Section -->
+                <div id="importPreview" class="import-preview hidden">
+                    <h4>Import Preview:</h4>
+                    <div id="previewContent"></div>
+                </div>
+
+                <!-- Error Display -->
+                <div id="importError" class="error-message hidden"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="previewImportBtn" class="btn btn-secondary">Preview</button>
+                <button id="cancelImportBtn" class="btn btn-secondary">Cancel</button>
+                <button id="confirmImportBtn" class="btn btn-primary">Import</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete All Tasks Confirmation Modal -->
+    <div id="deleteAllModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">⚠️ Delete All Tasks</h3>
+                <button class="modal-close" id="closeDeleteAllModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Warning: This action cannot be undone!</strong></p>
+                <p>Are you sure you want to delete all tasks? This will permanently remove all task data, including:</p>
+                <ul>
+                    <li>Task state and workflow information</li>
+                    <li>Branch associations</li>
+                    <li>Task metadata</li>
+                </ul>
+                <p class="text-hint">This will NOT delete any Git branches or ClickUp tasks, only the local workflow tracking data.</p>
+                
+                <!-- Error Display -->
+                <div id="deleteAllError" class="error-message hidden"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelDeleteAllBtn" class="btn btn-secondary">Cancel</button>
+                <button id="confirmDeleteAllBtn" class="btn btn-danger">Yes, Delete All Tasks</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Single Task Confirmation Modal -->
+    <div id="deleteTaskModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete Task</h3>
+                <button class="modal-close" id="closeDeleteTaskModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete task <strong id="deleteTaskName"></strong>?</p>
+                <p class="text-hint">This will permanently remove the local workflow tracking data for this task.</p>
+                
+                <!-- Error Display -->
+                <div id="deleteTaskError" class="error-message hidden"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelDeleteTaskBtn" class="btn btn-secondary">Cancel</button>
+                <button id="confirmDeleteTaskBtn" class="btn btn-danger">Delete Task</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Failed Imports Modal -->
+    <div id="failedImportsModal" class="modal-overlay hidden">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3 class="modal-title">Failed Task Imports</h3>
+                <button class="modal-close" id="closeFailedImportsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>The following tasks could not be imported automatically because the client folder could not be identified.</p>
+                <div id="failedImportsList" class="failed-imports-list">
+                    <!-- Failed imports will be rendered here -->
+                </div>
+                <div id="failedImportsEmptyState" class="empty-state hidden">
+                    <div class="empty-state-icon">✅</div>
+                    <div class="empty-state-title">No failed imports</div>
+                    <div class="empty-state-message">All tasks have been successfully mapped or imported.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="clearFailedImportsBtn" class="btn btn-secondary">Clear History</button>
+                <button id="retryAllFailedBtn" class="btn btn-primary">Retry All</button>
+                <button id="closeFailedImportsBtn" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="utils/formatting.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+

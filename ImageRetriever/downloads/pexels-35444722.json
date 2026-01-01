@@ -1,0 +1,22 @@
+{
+  "query": "lawncare technician",
+  "shape": "portrait",
+  "relatedText": "about us section image for trust hvac guy",
+  "provider": "pexels",
+  "photographer": "Şehriban karakaya",
+  "photoUrl": "https://www.pexels.com/photo/laboratory-technician-handling-cell-culture-equipment-35444722/",
+  "filename": "pexels-35444722.jpeg",
+  "dimensions": {
+    "width": 3025,
+    "height": 4033
+  },
+  "scores": {
+    "relevance": 16,
+    "cropFit": 100,
+    "quality": 100,
+    "safety": 100,
+    "final": 75
+  },
+  "turnNumber": 1,
+  "downloadedAt": "2026-01-01T00:42:08.828Z"
+}

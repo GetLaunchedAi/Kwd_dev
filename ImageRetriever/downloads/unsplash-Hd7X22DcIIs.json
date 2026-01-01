@@ -1,0 +1,22 @@
+{
+  "query": "hvac technician",
+  "shape": "portrait",
+  "relatedText": "about us section image for trust hvac guy",
+  "provider": "unsplash",
+  "photographer": "Ricardo Esquitin",
+  "photoUrl": "https://unsplash.com/photos/a-person-wearing-a-black-jacket-Hd7X22DcIIs",
+  "filename": "unsplash-Hd7X22DcIIs.jpg",
+  "dimensions": {
+    "width": 3024,
+    "height": 4032
+  },
+  "scores": {
+    "relevance": 10,
+    "cropFit": 100,
+    "quality": 100,
+    "safety": 100,
+    "final": 73
+  },
+  "turnNumber": 1,
+  "downloadedAt": "2026-01-01T00:41:57.161Z"
+}

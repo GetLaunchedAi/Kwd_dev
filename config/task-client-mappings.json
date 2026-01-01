@@ -1,0 +1,11 @@
+{
+  "mappings": {
+    "test-task-1767245109962": "TestClient"
+  },
+  "patternMappings": [
+    {
+      "pattern": ".*audit.*",
+      "client": "AuditClient"
+    }
+  ]
+}

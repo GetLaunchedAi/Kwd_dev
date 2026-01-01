@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workspace Mappings - ClickUp to Cursor</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .mappings-section {
+            padding: var(--spacing-3xl);
+        }
+        .mapping-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            margin-bottom: var(--spacing-xl);
+        }
+        .mapping-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: var(--spacing-md);
+        }
+        .mapping-table th, .mapping-table td {
+            text-align: left;
+            padding: var(--spacing-md);
+            border-bottom: 1px solid var(--border-color-light);
+        }
+        .mapping-table th {
+            font-weight: var(--font-weight-semibold);
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: var(--font-size-xs);
+        }
+        .mapping-actions {
+            display: flex;
+            gap: var(--spacing-sm);
+        }
+        .add-mapping-form {
+            display: flex;
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-xl);
+            flex-wrap: wrap;
+            align-items: flex-end;
+            background: var(--bg-tertiary);
+            padding: var(--spacing-lg);
+            border-radius: var(--radius-md);
+        }
+        .add-mapping-form .form-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        .add-mapping-form label {
+            display: block;
+            margin-bottom: var(--spacing-xs);
+            font-weight: var(--font-weight-medium);
+            font-size: var(--font-size-sm);
+        }
+        .add-mapping-form input {
+            width: 100%;
+            padding: var(--spacing-md);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .add-mapping-form input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+        }
+        .tabs {
+            display: flex;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-xl);
+            border-bottom: 2px solid var(--border-color-light);
+            padding-bottom: var(--spacing-sm);
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            padding: var(--spacing-md) var(--spacing-xl);
+            font-weight: var(--font-weight-medium);
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: var(--radius-md);
+            transition: var(--transition-normal);
+        }
+        .tab-btn:hover {
+            background: var(--bg-tertiary);
+        }
+        .tab-btn.active {
+            background: var(--color-primary);
+            color: var(--color-white);
+        }
+        .regex-badge {
+            font-family: monospace;
+            background: var(--bg-dark-secondary);
+            color: var(--color-white);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            font-size: var(--font-size-sm);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <a href="/" class="back-link">← Back to Dashboard</a>
+                <h1>Workspace Mappings</h1>
+            </div>
+        </header>
+
+        <div class="mappings-section">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="patterns">Pattern Mappings</button>
+                <button class="tab-btn" data-tab="tasks">Task Specific Mappings</button>
+            </div>
+
+            <!-- Pattern Mappings Tab -->
+            <div id="patternsTab" class="tab-content">
+                <div class="mapping-card">
+                    <h3>Add New Pattern Mapping</h3>
+                    <p class="text-hint mb-md">Pattern-based mappings use Regex to match task names and map them to client folders automatically.</p>
+                    <form id="addPatternForm" class="add-mapping-form">
+                        <div class="form-group">
+                            <label for="patternInput">Regex Pattern:</label>
+                            <input type="text" id="patternInput" placeholder="e.g. acme-.*" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="patternClientInput">Client Name:</label>
+                            <input type="text" id="patternClientInput" placeholder="e.g. acme-corp" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Mapping</button>
+                    </form>
+
+                    <h3>Existing Pattern Mappings</h3>
+                    <table class="mapping-table">
+                        <thead>
+                            <tr>
+                                <th>Pattern (Regex)</th>
+                                <th>Client Name</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="patternMappingsTableBody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                    <div id="noPatternsMessage" class="empty-state hidden">
+                        <p>No pattern mappings configured.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Task Specific Mappings Tab -->
+            <div id="tasksTab" class="tab-content hidden">
+                <div class="mapping-card">
+                    <h3>Add New Task Mapping</h3>
+                    <p class="text-hint mb-md">Explicitly map a specific ClickUp Task ID to a client folder.</p>
+                    <form id="addTaskMappingForm" class="add-mapping-form">
+                        <div class="form-group">
+                            <label for="taskIdMappingInput">Task ID:</label>
+                            <input type="text" id="taskIdMappingInput" placeholder="e.g. 86b7yt9z5" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="taskClientMappingInput">Client Name:</label>
+                            <input type="text" id="taskClientMappingInput" placeholder="e.g. acme-corp" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Mapping</button>
+                    </form>
+
+                    <h3>Existing Task Mappings</h3>
+                    <table class="mapping-table">
+                        <thead>
+                            <tr>
+                                <th>Task ID</th>
+                                <th>Client Name</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="taskMappingsTableBody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                    <div id="noTaskMappingsMessage" class="empty-state hidden">
+                        <p>No task-specific mappings configured.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="utils/formatting.js"></script>
+    <script src="mappings.js"></script>
+</body>
+</html>
+
+

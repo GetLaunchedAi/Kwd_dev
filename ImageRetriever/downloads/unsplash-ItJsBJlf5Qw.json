@@ -1,0 +1,22 @@
+{
+  "query": "hvac tech",
+  "shape": "landscape",
+  "relatedText": "about us section image for trust hvac guy",
+  "provider": "unsplash",
+  "photographer": "Andrianto Cahyono Putro",
+  "photoUrl": "https://unsplash.com/photos/an-air-conditioning-unit-mounted-on-a-wall-ItJsBJlf5Qw",
+  "filename": "unsplash-ItJsBJlf5Qw.jpg",
+  "dimensions": {
+    "width": 4896,
+    "height": 3264
+  },
+  "scores": {
+    "relevance": 16,
+    "cropFit": 100,
+    "quality": 100,
+    "safety": 100,
+    "final": 75
+  },
+  "turnNumber": 1,
+  "downloadedAt": "2026-01-01T00:44:41.479Z"
+}

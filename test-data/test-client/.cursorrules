@@ -1,0 +1,19 @@
+# Automated Task Processing
+
+IMPORTANT: There is a task file that needs your attention.
+
+## Task File Location
+C:\Users\yunus\OneDrive\Desktop\KWD Dev\test-data\test-client\CURSOR_TASK.md
+
+## Instructions
+1. Read the CURSOR_TASK.md file in this workspace
+2. Follow all instructions in that file
+3. Implement the required changes
+4. Test your changes
+5. Commit your changes when complete
+
+## Expected Behavior
+You should automatically start working on the task described in CURSOR_TASK.md when this workspace opens.
+
+---
+Generated: 2026-01-01T05:46:03.819Z

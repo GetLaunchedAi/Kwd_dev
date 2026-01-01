@@ -1,0 +1,16 @@
+ClickUp Settings Links:
+
+API Token Page:
+https://app.clickup.com/settings/apps
+(Then click "API" in the left sidebar)
+
+Webhooks Page:
+https://app.clickup.com/settings/apps
+(Then click "Webhooks" in the left sidebar)
+
+Main Settings:
+https://app.clickup.com/settings/apps
+
+
+
+
