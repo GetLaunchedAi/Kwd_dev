@@ -1,0 +1,171 @@
+/* General Styles */
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    color: #333;
+}
+
+.container {
+    width: 80%;
+    max-width: 1200px;
+    margin: 0 auto;
+    overflow: hidden;
+}
+
+/* Header & Nav */
+header {
+    background: purple;
+    color: #fff;
+    padding-top: 30px;
+    min-height: 70px;
+    border-bottom: #0779e4 3px solid;
+}
+
+header h1 {
+    float: left;
+    margin: 0;
+}
+
+header nav {
+    float: right;
+    margin-top: 10px;
+}
+
+header ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+header li {
+    display: inline;
+    margin-left: 20px;
+}
+
+header a {
+    color: #fff;
+    text-decoration: none;
+    text-transform: uppercase;
+    font-size: 16px;
+}
+
+header a:hover {
+    color: #0779e4;
+}
+
+/* Hero Section */
+.hero, .about-hero, .contact-hero {
+    background: #f4f4f4;
+    padding: 100px 0;
+    text-align: center;
+}
+
+.hero h2, .about-hero h2, .contact-hero h2 {
+    font-size: 40px;
+    margin-bottom: 20px;
+}
+
+.hero p, .about-hero p, .contact-hero p {
+    font-size: 20px;
+    margin-bottom: 30px;
+}
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    background: #0779e4;
+    color: #fff;
+    padding: 10px 20px;
+    text-decoration: none;
+    border-radius: 5px;
+    transition: background 0.3s ease;
+}
+
+.btn:hover {
+    background: #055ba3;
+}
+
+/* Services Section */
+.services {
+    padding: 50px 0;
+    background: url('https://images.unsplash.com/photo-1507005313807-145564e5b943?q=80&w=2000&auto=format&fit=crop') no-repeat center center/cover;
+}
+
+.services h2 {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.service-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.service-item {
+    background: #f4f4f4;
+    padding: 20px;
+    text-align: center;
+    border-radius: 5px;
+}
+
+/* About & Content Sections */
+section.content {
+    padding: 50px 0;
+}
+
+/* Contact Form */
+.contact-form {
+    padding: 50px 0;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.form-group input, .form-group textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.contact-info {
+    background: #f4f4f4;
+    padding: 30px 0;
+    text-align: center;
+}
+
+/* Footer */
+footer {
+    background: #333;
+    color: #fff;
+    text-align: center;
+    padding: 20px 0;
+    margin-top: 50px;
+}
+
+/* Responsive */
+@media(max-width: 768px) {
+    header h1, header nav {
+        float: none;
+        text-align: center;
+    }
+    header nav {
+        margin-top: 20px;
+    }
+    header li {
+        margin: 0 10px;
+    }
+    .service-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
