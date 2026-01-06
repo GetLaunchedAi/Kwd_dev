@@ -145,7 +145,7 @@ section.content {
 
 /* Footer */
 footer {
-    background: #333;
+    background: green;
     color: #fff;
     text-align: center;
     padding: 20px 0;
@@ -168,4 +168,6 @@ footer {
         grid-template-columns: 1fr;
     }
 }
+
+
 
