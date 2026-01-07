@@ -2,6 +2,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { logger } from '../utils/logger';
 import { ClickUpTask } from '../clickup/apiClient';
+import { config } from '../config/config';
 
 export enum WorkflowState {
   PENDING = 'pending',
@@ -14,6 +15,12 @@ export enum WorkflowState {
   ERROR = 'error',
 }
 
+export interface Revision {
+  iteration: number;
+  timestamp: string;
+  feedback: string;
+}
+
 export interface TaskState {
   taskId: string;
   state: WorkflowState;
@@ -22,14 +29,18 @@ export interface TaskState {
   createdAt: string;
   updatedAt: string;
   error?: string;
+  currentStep?: string;
+  command?: string;
   metadata?: Record<string, any>;
+  baseCommitHash?: string;
   agentCompletion?: {
-    baselineCommitHash?: string;
-    baselineBranch?: string;
     detectionStartedAt?: string;
     lastCheckedAt?: string;
     completionDetectedAt?: string;
   };
+  revisions?: Revision[];
+  lastRejectionAt?: string;
+  lastRejectionFeedback?: string;
 }
 
 export interface TaskInfo {
@@ -83,13 +94,14 @@ export async function saveTaskState(
   const existingState = await loadTaskState(clientFolder, taskId);
   
   const updatedState: TaskState = {
+    ...existingState,
+    ...state,
     taskId: taskId,
     clientFolder: clientFolder,
     state: state.state || existingState?.state || WorkflowState.PENDING,
-    createdAt: existingState?.createdAt || new Date().toISOString(),
+    branchName: state.branchName || existingState?.branchName || config.git.devBranch || 'main',
+    createdAt: existingState?.createdAt || state.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    ...existingState,
-    ...state,
   };
 
   await fs.writeJson(stateFilePath, updatedState, { spaces: 2 });
@@ -158,19 +170,55 @@ export async function loadTaskInfo(
 }
 
 /**
+ * Rejects a task with feedback
+ */
+export async function rejectTask(
+  clientFolder: string,
+  taskId: string,
+  feedback: string
+): Promise<TaskState> {
+  const currentState = await loadTaskState(clientFolder, taskId);
+  if (!currentState) {
+    throw new Error(`Task state not found for ${taskId}`);
+  }
+
+  const revisions = currentState.revisions || [];
+  const nextIteration = revisions.length + 1;
+  const timestamp = new Date().toISOString();
+
+  const newRevision: Revision = {
+    iteration: nextIteration,
+    timestamp,
+    feedback,
+  };
+
+  return await saveTaskState(clientFolder, taskId, {
+    ...currentState,
+    state: WorkflowState.REJECTED,
+    revisions: [...revisions, newRevision],
+    lastRejectionAt: timestamp,
+    lastRejectionFeedback: feedback,
+    updatedAt: timestamp,
+  });
+}
+
+
+/**
  * Updates workflow state
  */
 export async function updateWorkflowState(
   clientFolder: string,
   taskId: string,
   newState: WorkflowState,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  currentStep?: string
 ): Promise<TaskState> {
   const currentState = await loadTaskState(clientFolder, taskId);
   
   return await saveTaskState(clientFolder, taskId, {
     ...currentState,
     state: newState,
+    currentStep: currentStep !== undefined ? currentStep : currentState?.currentStep,
     metadata: {
       ...(currentState?.metadata || {}),
       ...(metadata || {}),

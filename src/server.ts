@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import * as path from 'path';
+import * as fs from 'fs-extra';
 import { config } from './config/config';
 import { logger } from './utils/logger';
 import { processWebhookEvent } from './clickup/webhookHandler';
@@ -12,6 +13,8 @@ import { generateChangeSummary } from './approval/changeSummarizer';
 import { loadTaskState } from './state/stateManager';
 import { getAuthorizationUrl, exchangeCodeForToken, generateState, getAccessToken } from './clickup/oauthService';
 import { importTask, previewTaskImport } from './handlers/taskImportHandler';
+import { taskStatusManager } from './cursor/taskStatusManager';
+import { webhookStateManager } from './state/webhookState';
 
 const app = express();
 
@@ -42,18 +45,11 @@ function trackFailedImport(taskId: string, taskName: string, error: string, clic
 // Middleware
 app.use(express.json());
 
-// #region agent log
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api/tasks/import')) {
-    fetch('http://127.0.0.1:7243/ingest/d494afa8-946f-47d4-9935-30e65c9d5f53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'src/server.ts:middleware',message:'Incoming import request',data:{method:req.method,path:req.path,body:req.body},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-  }
-  next();
-});
-// #endregion
 
 // Serve static files from public directory
 const publicDir = path.join(process.cwd(), 'public');
 app.use(express.static(publicDir));
+app.use('/screenshots', express.static(path.join(publicDir, 'screenshots')));
 
 // Health check endpoint
 app.get('/api/health', async (req: Request, res: Response) => {
@@ -97,6 +93,56 @@ app.get('/api/health', async (req: Request, res: Response) => {
 // Basic health check endpoint (kept for simplicity)
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Webhook control endpoints
+app.get('/api/webhook/status', async (req: Request, res: Response) => {
+  try {
+    const state = webhookStateManager.getState();
+    res.json(state);
+  } catch (error: any) {
+    logger.error(`Error getting webhook status: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webhook/toggle', async (req: Request, res: Response) => {
+  try {
+    const newState = await webhookStateManager.toggle('dashboard');
+    res.json({ 
+      enabled: newState,
+      message: `Webhook ${newState ? 'enabled' : 'disabled'}`
+    });
+  } catch (error: any) {
+    logger.error(`Error toggling webhook: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webhook/enable', async (req: Request, res: Response) => {
+  try {
+    await webhookStateManager.enable('dashboard');
+    res.json({ 
+      enabled: true,
+      message: 'Webhook enabled'
+    });
+  } catch (error: any) {
+    logger.error(`Error enabling webhook: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webhook/disable', async (req: Request, res: Response) => {
+  try {
+    await webhookStateManager.disable('dashboard');
+    res.json({ 
+      enabled: false,
+      message: 'Webhook disabled'
+    });
+  } catch (error: any) {
+    logger.error(`Error disabling webhook: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // OAuth endpoints
@@ -199,6 +245,12 @@ app.get('/auth/clickup/callback', async (req: Request, res: Response) => {
 app.post('/webhook/clickup', async (req: Request, res: Response) => {
   try {
     logger.info('Received ClickUp webhook');
+    
+    // Check if webhook is enabled
+    if (!webhookStateManager.isEnabled()) {
+      logger.info('Webhook is disabled, ignoring event');
+      return res.status(200).json({ message: 'Webhook is currently disabled' });
+    }
     
     const processedEvent = await processWebhookEvent(req);
     
@@ -427,24 +479,65 @@ app.post('/api/tasks/:taskId/trigger-agent', async (req: Request, res: Response)
     const { findTaskById } = await import('./utils/taskScanner');
     const { taskState, taskInfo, clientFolder } = await findTaskById(taskId);
 
+
     if (!taskState || !taskInfo || !clientFolder) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    const { triggerAgent } = await import('./cursor/agentTrigger');
-    const { triggerCursorAgent, openCursorWorkspace } = await import('./cursor/workspaceManager');
+    const { triggerCursorAgent } = await import('./cursor/workspaceManager');
     
-    // Step 1: Open Cursor workspace if not already open
-    await openCursorWorkspace(clientFolder);
-    
-    // Step 2: Trigger the agent
-    const promptPath = path.join(clientFolder, 'CURSOR_TASK.md');
-    await triggerAgent(clientFolder, promptPath, taskInfo.task);
+    // Trigger the agent - this handles state, opening, and automation centrally
     await triggerCursorAgent(clientFolder, taskInfo.task);
 
     res.json({ success: true, message: 'Cursor agent triggered successfully' });
   } catch (error: any) {
     logger.error(`Error triggering agent for task ${req.params.taskId}: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reject task with feedback
+app.post('/api/tasks/:taskId/reject', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { feedback } = req.body;
+
+    // Validate feedback
+    if (!feedback || typeof feedback !== 'string' || feedback.trim().length < 3) {
+      return res.status(400).json({ 
+        error: 'Valid feedback is required (minimum 3 characters)' 
+      });
+    }
+
+    const trimmedFeedback = feedback.trim();
+
+    const { findTaskById } = await import('./utils/taskScanner');
+    const { taskState, clientFolder } = await findTaskById(taskId);
+
+    if (!taskState || !clientFolder) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Check if task is running
+    const { taskCleanupService } = await import('./cursor/taskCleanupService');
+    const isRunning = await taskCleanupService.isTaskRunning(taskId, clientFolder);
+
+    if (isRunning) {
+      return res.status(409).json({ 
+        error: 'Cannot reject task while it is running. Please wait for the agent to finish or cancel the task first.' 
+      });
+    }
+
+    const { rejectTask } = await import('./state/stateManager');
+    const updatedState = await rejectTask(clientFolder, taskId, trimmedFeedback);
+
+    res.json({ 
+      success: true, 
+      message: 'Task rejected with feedback successfully',
+      state: updatedState 
+    });
+  } catch (error: any) {
+    logger.error(`Error rejecting task ${req.params.taskId}: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 });
@@ -492,7 +585,7 @@ app.post('/api/tasks/import-incomplete', async (req: Request, res: Response) => 
         }
 
         // Extract client name and find folder
-        const extractionResult = await extractClientName(task.name, task.id);
+        const extractionResult = await extractClientName(task.name, task.id, task);
         let clientName: string | null = extractionResult.clientName;
         
         // If extraction failed, try manual mapping as fallback
@@ -520,7 +613,7 @@ app.post('/api/tasks/import-incomplete', async (req: Request, res: Response) => 
         }
 
         const clientFolderInfo = await findClientFolder(clientName);
-        if (!clientFolderInfo || !clientFolderInfo.isValid) {
+        if (!clientFolderInfo) {
           const suggestionsMsg = extractionResult.suggestions && extractionResult.suggestions.length > 0
             ? ` Suggested matches: ${extractionResult.suggestions.join(', ')}`
             : '';
@@ -606,7 +699,7 @@ app.post('/api/tasks/retry-import', async (req: Request, res: Response) => {
         }
 
         // Extract client name and find folder
-        const extractionResult = await extractClientName(task.name, task.id);
+        const extractionResult = await extractClientName(task.name, task.id, task);
         let clientName: string | null = extractionResult.clientName;
         
         // If extraction failed, try manual mapping as fallback
@@ -634,7 +727,7 @@ app.post('/api/tasks/retry-import', async (req: Request, res: Response) => {
         }
 
         const clientFolderInfo = await findClientFolder(clientName);
-        if (!clientFolderInfo || !clientFolderInfo.isValid) {
+        if (!clientFolderInfo) {
           const suggestionsMsg = extractionResult.suggestions && extractionResult.suggestions.length > 0
             ? ` Suggested matches: ${extractionResult.suggestions.join(', ')}`
             : '';
@@ -715,6 +808,35 @@ app.delete('/api/tasks/failed-imports', async (req: Request, res: Response) => {
   }
 });
 
+// Cursor Agent Queue status endpoint
+app.get('/api/cursor/status', async (req: Request, res: Response) => {
+  try {
+    const { agentQueue } = await import('./cursor/agentQueue');
+    const status = await agentQueue.getStatus();
+    
+    if (!status) {
+      return res.json({ state: 'idle' });
+    }
+    
+    res.json(status);
+  } catch (error: any) {
+    logger.error(`Error fetching agent status: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Clear Cursor Agent Queue
+app.delete('/api/cursor/queue', async (req: Request, res: Response) => {
+  try {
+    const { agentQueue } = await import('./cursor/agentQueue');
+    const result = await agentQueue.clearQueue();
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    logger.error(`Error clearing agent queue: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get task details
 app.get('/api/tasks/:taskId', async (req: Request, res: Response) => {
   try {
@@ -724,6 +846,38 @@ app.get('/api/tasks/:taskId', async (req: Request, res: Response) => {
 
     if (!taskState || !taskInfo) {
       return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Inject real-time agent step if task is currently running or queued
+    try {
+      const taskStatus = await taskStatusManager.getStatus(taskId);
+      if (taskStatus && (taskStatus.state === 'RUNNING' || taskStatus.state === 'STARTING')) {
+        taskState.currentStep = taskStatus.step;
+        if (taskStatus.command) {
+          taskState.command = taskStatus.command;
+        }
+      } else {
+        const { agentQueue } = await import('./cursor/agentQueue');
+        const agentStatus = await agentQueue.getStatus();
+        
+        if (agentStatus && agentStatus.task && agentStatus.task.taskId === taskId) {
+          // If it's the active task in current.json, use its step
+          taskState.currentStep = agentStatus.step;
+          // Check if there's a command in the task-specific status too
+          if (taskStatus && taskStatus.command) {
+            taskState.command = taskStatus.command;
+          }
+        } else if (taskState.state === 'in_progress' || taskState.state === 'pending') {
+          // If not active but in_progress/pending, check if it's in queue or running dir
+          if (await agentQueue.isTaskQueued(taskId)) {
+            taskState.currentStep = 'Waiting in queue';
+          } else if (await agentQueue.isTaskRunning(taskId)) {
+            taskState.currentStep = 'Starting agent...';
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn(`Could not fetch agent status for task ${taskId}: ${error}`);
     }
 
     if (refresh === 'true' && clientFolder) {
@@ -747,6 +901,18 @@ app.get('/api/tasks/:taskId', async (req: Request, res: Response) => {
       taskState,
       taskInfo,
       clientFolder,
+      systemPrompt: await (async () => {
+        if (!clientFolder) return null;
+        try {
+          const promptPath = path.join(clientFolder, 'CURSOR_TASK.md');
+          if (await fs.pathExists(promptPath)) {
+            return await fs.readFile(promptPath, 'utf-8');
+          }
+        } catch (e) {
+          logger.warn(`Could not read system prompt for task ${taskId}: ${e}`);
+        }
+        return null;
+      })()
     });
   } catch (error: any) {
     logger.error(`Error fetching task details: ${error.message}`);
@@ -775,10 +941,62 @@ app.patch('/api/tasks/:taskId/description', async (req: Request, res: Response) 
     const { saveTaskInfo } = await import('./state/stateManager');
     await saveTaskInfo(clientFolder, taskId, taskInfo);
 
+    // Update ClickUp task
+    try {
+      const { clickUpApiClient } = await import('./clickup/apiClient');
+      await clickUpApiClient.updateTaskDescription(taskId, description);
+      logger.info(`Updated ClickUp description for task ${taskId}`);
+    } catch (clickupError: any) {
+      logger.warn(`Could not update ClickUp description for task ${taskId}: ${clickupError.message}`);
+      // Don't fail the whole request if ClickUp update fails, as local state is updated
+    }
+
+    // Update CURSOR_TASK.md if task is in progress
+    const { WorkflowState } = await import('./state/stateManager');
+    if (taskState.state === WorkflowState.IN_PROGRESS || taskState.state === WorkflowState.PENDING) {
+      try {
+        const { generatePromptFile } = await import('./cursor/promptGenerator');
+        const { detectTestFramework } = await import('./testing/testRunner');
+        const testCommand = await detectTestFramework(clientFolder);
+        const client = taskInfo.task.custom_fields?.find((f: any) => f.name === 'Client Name')?.value || 'Unknown';
+        await generatePromptFile(clientFolder, client, taskInfo.task, taskState.branchName, testCommand || undefined);
+        logger.info(`Updated CURSOR_TASK.md for task ${taskId} with new description`);
+      } catch (promptError: any) {
+        logger.warn(`Could not update CURSOR_TASK.md for task ${taskId}: ${promptError.message}`);
+      }
+    }
+
     logger.info(`Updated description for task ${taskId}`);
     res.json({ success: true, description });
   } catch (error: any) {
     logger.error(`Error updating task description: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update system prompt (CURSOR_TASK.md)
+app.patch('/api/tasks/:taskId/system-prompt', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { systemPrompt } = req.body;
+
+    if (systemPrompt === undefined) {
+      return res.status(400).json({ error: 'System prompt content is required' });
+    }
+
+    const { clientFolder } = await findTaskById(taskId);
+
+    if (!clientFolder) {
+      return res.status(404).json({ error: 'Task not found or client folder missing' });
+    }
+
+    const promptPath = path.join(clientFolder, 'CURSOR_TASK.md');
+    await fs.writeFile(promptPath, systemPrompt, 'utf-8');
+
+    logger.info(`Updated system prompt for task ${taskId} at ${promptPath}`);
+    res.json({ success: true, systemPrompt });
+  } catch (error: any) {
+    logger.error(`Error updating system prompt: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 });
@@ -794,7 +1012,17 @@ app.get('/api/tasks/:taskId/diff', async (req: Request, res: Response) => {
     }
 
     if (!taskState.branchName) {
-      return res.status(400).json({ error: 'No branch found for this task' });
+      return res.json({ 
+        noBranch: true,
+        filesModified: 0,
+        filesAdded: 0,
+        filesDeleted: 0,
+        linesAdded: 0,
+        linesRemoved: 0,
+        fileList: [],
+        diffPreview: '',
+        fullDiff: ''
+      });
     }
 
     const changeSummary = await generateChangeSummary(clientFolder, taskState.branchName);
@@ -932,10 +1160,134 @@ app.get('/api/mappings', async (req: Request, res: Response) => {
   }
 });
 
+// Task Status and Logs API
+
+// Get task status
+app.get('/api/tasks/:taskId/status', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { findTaskById } = await import('./utils/taskScanner');
+    const { clientFolder } = await findTaskById(taskId);
+    
+    const status = await taskStatusManager.getStatus(taskId, clientFolder || undefined);
+    
+    if (!status) {
+      // If not found in task-scoped status, fall back to agentQueue status if applicable
+      const { agentQueue } = await import('./cursor/agentQueue');
+      const queueStatus = await agentQueue.getStatus();
+      if (queueStatus && queueStatus.task && queueStatus.task.taskId === taskId) {
+        return res.json({
+          taskId,
+          state: queueStatus.state.toUpperCase(),
+          percent: queueStatus.percent,
+          step: queueStatus.step,
+          notes: queueStatus.notes.join('\n'),
+          lastUpdate: queueStatus.lastUpdate
+        });
+      }
+      return res.status(404).json({ error: 'Status not found for task' });
+    }
+    
+    res.json(status);
+  } catch (error: any) {
+    logger.error(`Error fetching task status: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get task logs
+app.get('/api/tasks/:taskId/logs', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const tail = parseInt(req.query.tail as string) || 200;
+    
+    const { findTaskById } = await import('./utils/taskScanner');
+    const { clientFolder } = await findTaskById(taskId);
+    
+    const logs = await taskStatusManager.getLogs(taskId, tail, clientFolder || undefined);
+    res.json(logs);
+  } catch (error: any) {
+    logger.error(`Error fetching task logs: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Optional: SSE for real-time events
+app.get('/api/tasks/:taskId/events', async (req: Request, res: Response) => {
+  const { taskId } = req.params;
+  const { findTaskById } = await import('./utils/taskScanner');
+  const { clientFolder } = await findTaskById(taskId);
+  
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Initial status
+  const status = await taskStatusManager.getStatus(taskId, clientFolder || undefined);
+  if (status) {
+    sendEvent({ type: 'status', ...status });
+  }
+
+  // Hook into CursorCliRunner events if possible
+  // This is a bit tricky because the runner might not be in the same process or memory
+  // For now, we'll just poll the status file every second
+  const interval = setInterval(async () => {
+    const currentStatus = await taskStatusManager.getStatus(taskId, clientFolder || undefined);
+    if (currentStatus) {
+      sendEvent({ type: 'status', ...currentStatus });
+      if (currentStatus.state === 'DONE' || currentStatus.state === 'FAILED') {
+        clearInterval(interval);
+        res.end();
+      }
+    }
+  }, 1000);
+
+  req.on('close', () => {
+    clearInterval(interval);
+  });
+});
+
+// Serve task attachments from client folders
+app.get('/api/tasks/:taskId/attachments/:filename', async (req: Request, res: Response) => {
+  try {
+    const { taskId, filename } = req.params;
+    const { findTaskById } = await import('./utils/taskScanner');
+    const { clientFolder } = await findTaskById(taskId);
+
+    if (!clientFolder) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const attachmentPath = path.join(clientFolder, '.cursor', 'attachments', taskId, filename);
+    
+    if (await fs.pathExists(attachmentPath)) {
+      res.sendFile(attachmentPath);
+    } else {
+      res.status(404).json({ error: 'Attachment not found locally' });
+    }
+  } catch (error: any) {
+    logger.error(`Error serving attachment: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server
 const PORT = config.server.port || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   logger.info(`Server started on port ${PORT}`);
   logger.info(`ClickUp webhook endpoint: http://localhost:${PORT}/webhook/clickup`);
   logger.info(`Health check: http://localhost:${PORT}/health`);
+
+  // Resume active completion detections
+  try {
+    const { resumeActiveDetections } = await import('./cursor/agentCompletionDetector');
+    await resumeActiveDetections();
+  } catch (error: any) {
+    logger.error(`Error resuming active detections: ${error.message}`);
+  }
 });
