@@ -518,6 +518,20 @@ app.post('/api/tasks/:taskId/reject', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
+    // Guard: Only allow rejection in specific states
+    const { WorkflowState } = await import('./state/stateManager');
+    const allowedStates: string[] = [
+      WorkflowState.AWAITING_APPROVAL,
+      WorkflowState.TESTING,
+      WorkflowState.REJECTED // Allow updating feedback if already rejected
+    ];
+
+    if (!allowedStates.includes(taskState.state)) {
+      return res.status(409).json({ 
+        error: `Cannot reject task in current state: ${taskState.state}. Rejection is only allowed for tasks awaiting approval or in testing.` 
+      });
+    }
+
     // Check if task is running
     const { taskCleanupService } = await import('./cursor/taskCleanupService');
     const isRunning = await taskCleanupService.isTaskRunning(taskId, clientFolder);
