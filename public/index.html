@@ -5,95 +5,201 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ClickUp to Cursor Workflow Dashboard</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🚀 ClickUp to Cursor Workflow Dashboard</h1>
-            <div class="header-actions">
-                <div class="header-actions-group">
-                    <div id="connectionStatus" class="connection-status">
-                        <span class="status-indicator status-offline" id="statusIndicator"></span>
-                        <span id="statusText">Checking connection...</span>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+                <div id="connectionStatus" class="connection-status">
+                    <span class="status-indicator status-offline" id="statusIndicator"></span>
+                    <span id="statusText">Offline</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item active">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-title">
+                    <h1>Dashboard</h1>
+                </div>
+
+                <div class="header-actions">
+                    <!-- Webhook Toggle Button -->
+                    <div class="webhook-status-container">
+                        <button id="webhookToggleBtn" class="btn btn-ghost btn-icon webhook-toggle" title="Webhook is disabled">
+                            <i data-lucide="play" id="webhookPlayIcon"></i>
+                            <i data-lucide="pause" id="webhookPauseIcon" class="hidden"></i>
+                        </button>
+                        <span id="webhookStatusText" class="webhook-status-text">Webhook Off</span>
                     </div>
-                    <div class="auto-refresh-indicator hidden" id="autoRefreshIndicator">
+                    <div class="divider-v"></div>
+                    <div id="autoRefreshIndicator" class="auto-refresh-indicator hidden">
                         <div class="auto-refresh-dot"></div>
-                        <span>Auto-refreshing</span>
+                        <span>Auto-sync</span>
                     </div>
-                    <button id="pauseRefreshBtn" class="btn btn-secondary hidden">Pause</button>
+                    <button id="pauseRefreshBtn" class="btn btn-ghost btn-icon hidden" title="Pause auto-refresh">
+                        <i data-lucide="pause"></i>
+                    </button>
+                    <div class="divider-v"></div>
+                    <button id="refreshBtn" class="btn btn-primary btn-sm">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Refresh</span>
+                    </button>
+                    <div class="button-group">
+                        <button id="importTaskBtn" class="btn btn-secondary btn-sm">
+                            <i data-lucide="plus"></i>
+                            <span>Import</span>
+                        </button>
+                        <button id="importIncompleteBtn" class="btn btn-secondary btn-sm">
+                            <i data-lucide="download-cloud"></i>
+                            <span>Bulk</span>
+                        </button>
+                    </div>
+                    <button id="failedImportsBtn" class="btn btn-secondary btn-icon-badge btn-sm">
+                        <i data-lucide="alert-circle"></i>
+                        <span id="failedImportsCount" class="badge hidden">0</span>
+                    </button>
+                    <div class="divider-v"></div>
+                    <button id="checkGitBtn" class="btn btn-ghost btn-icon btn-sm" title="Check Git Status">
+                        <i data-lucide="git-branch"></i>
+                    </button>
                 </div>
-                <div class="header-actions-group">
-                    <button id="importTaskBtn" class="btn btn-secondary">Import Task</button>
-                    <button id="importIncompleteBtn" class="btn btn-secondary">Add All Incomplete Tasks</button>
-                    <button id="failedImportsBtn" class="btn btn-secondary">Failed Imports <span id="failedImportsCount" class="badge hidden">0</span></button>
-                    <a href="/mappings.html" class="btn btn-secondary">Mappings</a>
-                    <button id="deleteAllTasksBtn" class="btn btn-danger">Delete All Tasks</button>
-                </div>
-                <div class="header-actions-group">
-                    <button id="refreshBtn" class="btn btn-primary">Refresh</button>
-                </div>
-            </div>
-        </header>
+            </header>
 
-        <div id="loading" class="loading">
-            <div class="skeleton-card skeleton-card-spacing">
-                <div class="skeleton skeleton-title"></div>
-                <div class="skeleton skeleton-text"></div>
-                <div class="skeleton skeleton-text"></div>
-                <div class="skeleton skeleton-text skeleton-width-80"></div>
-            </div>
-        </div>
-        <div id="error" class="error hidden">
-            <div id="errorMessage" class="error-message"></div>
-            <button id="retryBtn" class="btn btn-primary">Retry</button>
-        </div>
+            <div class="content-container">
+                <div class="dashboard-controls">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="searchInput" class="search-input" placeholder="Search tasks by name, ID, or client...">
+                        <span class="search-shortcut">/</span>
+                    </div>
+                    
+                    <div class="filters-box">
+                        <div class="filter-group">
+                            <i data-lucide="filter"></i>
+                            <select id="filterSelect" class="filter-select">
+                                <option value="all">All Status</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="awaiting_approval">Awaiting Approval</option>
+                                <option value="testing">Testing</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <i data-lucide="arrow-up-down"></i>
+                            <select id="sortSelect" class="sort-select">
+                                <option value="updated_desc">Recently Updated</option>
+                                <option value="updated_asc">Oldest Updated</option>
+                                <option value="created_desc">Recently Created</option>
+                                <option value="created_asc">Oldest Created</option>
+                                <option value="name_asc">Name (A-Z)</option>
+                                <option value="name_desc">Name (Z-A)</option>
+                                <option value="client_asc">Client (A-Z)</option>
+                                <option value="state_asc">State</option>
+                            </select>
+                        </div>
 
-        <div id="tasksContainer" class="tasks-container hidden">
-            <div class="tasks-header">
-                <select id="filterSelect" class="filter-select">
-                    <option value="all">All Tasks</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="awaiting_approval">Awaiting Approval</option>
-                    <option value="testing">Testing</option>
-                    <option value="completed">Completed</option>
-                </select>
-            </div>
-            <div class="search-sort-container">
-                <input type="text" id="searchInput" class="search-input" placeholder="Search tasks by name, ID, or client...">
-                <select id="sortSelect" class="sort-select">
-                    <option value="updated_desc">Recently Updated</option>
-                    <option value="updated_asc">Oldest Updated</option>
-                    <option value="created_desc">Recently Created</option>
-                    <option value="created_asc">Oldest Created</option>
-                    <option value="name_asc">Name (A-Z)</option>
-                    <option value="name_desc">Name (Z-A)</option>
-                    <option value="client_asc">Client (A-Z)</option>
-                    <option value="state_asc">State</option>
-                </select>
-            </div>
-            <div id="tasksList" class="tasks-list"></div>
-            <div id="emptyState" class="empty-state hidden">
-                <div class="empty-state-icon">📋</div>
-                <div class="empty-state-title">No tasks found</div>
-                <div class="empty-state-message">Try adjusting your search or filter criteria</div>
-            </div>
-            
-            <!-- All Tasks Section (Grouped by Client) -->
-            <div id="allTasksSection" class="all-tasks-section hidden mt-4xl">
-                <div class="tasks-header">
-                    <h2>All Tasks (Grouped by Client)</h2>
+                        <div class="button-group">
+                            <button id="viewQueueBtn" class="btn btn-secondary btn-icon" title="View agent queue">
+                                <i data-lucide="list-ordered"></i>
+                            </button>
+                            <button id="clearQueueBtn" class="btn btn-warning btn-icon" title="Clear agent queue">
+                                <i data-lucide="list-x"></i>
+                            </button>
+                            <button id="deleteAllTasksBtn" class="btn btn-danger btn-icon" title="Delete all tasks">
+                                <i data-lucide="trash-2"></i>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div id="allTasksList" class="all-tasks-list"></div>
-                <div id="allTasksEmptyState" class="empty-state hidden">
-                    <div class="empty-state-icon">📋</div>
-                    <div class="empty-state-title">No tasks in All Tasks section</div>
-                    <div class="empty-state-message">Click "Add All Incomplete Tasks" to import tasks from ClickUp</div>
+
+                <div id="loading" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading your dashboard...</p>
+                </div>
+
+                <div id="error" class="error-state hidden">
+                    <i data-lucide="x-circle"></i>
+                    <div id="errorMessage" class="error-message"></div>
+                    <button id="retryBtn" class="btn btn-primary">Retry</button>
+                </div>
+
+                <div id="tasksContainer" class="tasks-container hidden">
+                    <div id="tasksList" class="tasks-grid"></div>
+                    
+                    <div id="emptyState" class="empty-state hidden">
+                        <div class="empty-state-visual">
+                            <i data-lucide="clipboard-list"></i>
+                        </div>
+                        <h2 class="empty-state-title">No tasks found</h2>
+                        <p class="empty-state-message">Try adjusting your search or filter criteria</p>
+                    </div>
+                    
+                    <!-- All Tasks Section (Grouped by Client) -->
+                    <section id="allTasksSection" class="all-tasks-section hidden">
+                        <div class="section-header">
+                            <h2>All Tasks (Grouped by Client)</h2>
+                            <div class="section-divider"></div>
+                        </div>
+                        <div id="allTasksList" class="all-tasks-list"></div>
+                        <div id="allTasksEmptyState" class="empty-state hidden">
+                            <div class="empty-state-visual">
+                                <i data-lucide="folder-open"></i>
+                            </div>
+                            <h2 class="empty-state-title">No client tasks</h2>
+                            <p class="empty-state-message">Click "Bulk Import" to import tasks from ClickUp</p>
+                        </div>
+                    </section>
                 </div>
             </div>
-        </div>
+        </main>
     </div>
 
-    <!-- Import Task Modal -->
+    <!-- Modals (kept mostly the same but with some structural tweaks for style) -->
     <div id="importModal" class="modal-overlay hidden">
         <div class="modal">
             <div class="modal-header">
@@ -116,6 +222,15 @@
                     <label for="clientNameInput">Client Name (optional):</label>
                     <input type="text" id="clientNameInput" class="modal-input" placeholder="e.g., acme-corp (leave empty to auto-detect)">
                     <small class="text-hint">Override auto-detection by specifying a client name</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="importModelSelect">AI Model (optional):</label>
+                    <select id="importModelSelect" class="modal-input">
+                        <option value="">Use Default</option>
+                        <!-- Populated dynamically -->
+                    </select>
+                    <small class="text-hint">Select a specific AI model for this task</small>
                 </div>
                 
                 <div class="form-group-sm">
@@ -216,6 +331,106 @@
         </div>
     </div>
 
+    <!-- Queue Viewer Modal -->
+    <div id="queueModal" class="modal-overlay hidden">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i data-lucide="list-ordered"></i>
+                    Agent Queue Status
+                </h3>
+                <button class="modal-close" id="closeQueueModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Queue Health Banner -->
+                <div id="queueHealthBanner" class="queue-health-banner healthy">
+                    <div class="health-status">
+                        <i data-lucide="check-circle" id="queueHealthIcon"></i>
+                        <span id="queueHealthText">Queue is healthy</span>
+                    </div>
+                    <span id="queueLastActivity" class="queue-last-activity"></span>
+                </div>
+
+                <!-- Queue Issues (if any) -->
+                <div id="queueIssues" class="queue-issues hidden">
+                    <h4><i data-lucide="alert-triangle"></i> Issues Detected</h4>
+                    <ul id="queueIssuesList"></ul>
+                </div>
+
+                <!-- Queue Sections -->
+                <div class="queue-sections">
+                    <!-- Running Section -->
+                    <div class="queue-section">
+                        <div class="queue-section-header running">
+                            <i data-lucide="play-circle"></i>
+                            <span>Running</span>
+                            <span id="runningCount" class="queue-count">0</span>
+                        </div>
+                        <div id="runningTasks" class="queue-task-list">
+                            <p class="queue-empty">No tasks running</p>
+                        </div>
+                    </div>
+
+                    <!-- Queued Section -->
+                    <div class="queue-section">
+                        <div class="queue-section-header queued">
+                            <i data-lucide="clock"></i>
+                            <span>Queued</span>
+                            <span id="queuedCount" class="queue-count">0</span>
+                        </div>
+                        <div id="queuedTasks" class="queue-task-list">
+                            <p class="queue-empty">No tasks queued</p>
+                        </div>
+                    </div>
+
+                    <!-- Recent Completed Section -->
+                    <div class="queue-section">
+                        <div class="queue-section-header done">
+                            <i data-lucide="check-circle"></i>
+                            <span>Recently Completed</span>
+                            <span id="doneCount" class="queue-count">0</span>
+                        </div>
+                        <div id="doneTasks" class="queue-task-list">
+                            <p class="queue-empty">No recent completions</p>
+                        </div>
+                    </div>
+
+                    <!-- Recent Failed Section -->
+                    <div class="queue-section">
+                        <div class="queue-section-header failed">
+                            <i data-lucide="x-circle"></i>
+                            <span>Recently Failed</span>
+                            <span id="failedCount" class="queue-count">0</span>
+                        </div>
+                        <div id="failedTasks" class="queue-task-list">
+                            <p class="queue-empty">No recent failures</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Current Status Details -->
+                <div id="currentStatusSection" class="current-status-section hidden">
+                    <h4>Current Task Status</h4>
+                    <div id="currentStatusDetails" class="current-status-details"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="refreshQueueBtn" class="btn btn-secondary">
+                    <i data-lucide="refresh-cw"></i> Refresh
+                </button>
+                <button id="unstickQueueBtn" class="btn btn-warning">
+                    <i data-lucide="unlock"></i> Unstick Running
+                </button>
+                <button id="clearAllQueuesBtn" class="btn btn-danger">
+                    <i data-lucide="trash-2"></i> Clear All
+                </button>
+                <button id="closeQueueModalBtn" class="btn btn-primary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
     <script src="utils/api.js"></script>
     <script src="utils/notifications.js"></script>
     <script src="utils/formatting.js"></script>

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clients Dashboard - KWD Dev</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+                <div id="connectionStatus" class="connection-status">
+                    <span class="status-indicator status-offline" id="statusIndicator"></span>
+                    <span id="statusText">Offline</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item active">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-title">
+                    <h1>Clients</h1>
+                </div>
+
+                <div class="header-actions">
+                    <button id="addClientBtn" class="btn btn-success btn-sm">
+                        <i data-lucide="plus"></i>
+                        <span>Add Client</span>
+                    </button>
+                    <button id="refreshClientsBtn" class="btn btn-primary btn-sm">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Refresh</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div class="dashboard-controls">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="clientSearchInput" class="search-input" placeholder="Search clients by name or folder...">
+                    </div>
+                    
+                    <div class="filters-box">
+                        <div class="filter-group">
+                            <i data-lucide="arrow-up-down"></i>
+                            <select id="clientSortSelect" class="sort-select">
+                                <option value="name_asc">Name (A-Z)</option>
+                                <option value="name_desc">Name (Z-A)</option>
+                                <option value="tasks_desc">Most Tasks</option>
+                                <option value="tasks_asc">Least Tasks</option>
+                                <option value="active_desc">Most Active</option>
+                                <option value="activity_desc">Recent Activity</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="loading" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading clients...</p>
+                </div>
+
+                <div id="error" class="error-state hidden">
+                    <i data-lucide="x-circle"></i>
+                    <div id="errorMessage" class="error-message"></div>
+                    <button id="retryBtn" class="btn btn-primary">Retry</button>
+                </div>
+
+                <div id="clientsContainer" class="hidden">
+                    <div id="clientsList" class="tasks-grid">
+                        <!-- Client cards will be rendered here -->
+                    </div>
+                    
+                    <div id="emptyState" class="empty-state hidden">
+                        <div class="empty-state-visual">
+                            <i data-lucide="users"></i>
+                        </div>
+                        <h2 class="empty-state-title">No clients found</h2>
+                        <p class="empty-state-message">No client websites were detected in the repository.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Terminal Modal -->
+    <div id="terminalModal" class="modal-overlay hidden">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3 class="modal-title">Project Terminal - <span id="terminalClientName"></span></h3>
+                <button class="modal-close" id="closeTerminalModal">&times;</button>
+            </div>
+            <div class="modal-body terminal-body">
+                <div class="terminal-status-bar">
+                    <div class="flex items-center gap-md">
+                        <span id="terminalStatus" class="preview-status">
+                            <span class="status-dot"></span>
+                            <span id="terminalStatusText">Inactive</span>
+                        </span>
+                        <div class="divider-v" style="height: 12px; opacity: 0.3;"></div>
+                        <div id="terminalNodeStatus" class="flex items-center gap-xs text-hint" data-tooltip="Node Modules Status">
+                            <i data-lucide="package" class="size-xs"></i>
+                            <span class="status-text">Checking...</span>
+                        </div>
+                    </div>
+                    <span id="terminalPath" class="terminal-path"></span>
+                </div>
+                
+                <div id="terminalOutput" class="terminal-output">
+                    <!-- Logs will appear here -->
+                </div>
+                
+                <div class="terminal-input-container">
+                    <span class="terminal-prompt">$</span>
+                    <input type="text" id="terminalInput" placeholder="Enter command (e.g., npm install)..." autocomplete="off">
+                    <button id="runCommandBtn" class="btn btn-primary btn-sm">Run</button>
+                </div>
+                
+                <div class="terminal-shortcuts mt-md">
+                    <span class="text-hint">Quick commands:</span>
+                    <div class="flex gap-sm mt-sm">
+                        <button class="btn btn-ghost btn-xs quick-cmd" data-cmd="npm install --include=dev" data-tooltip="Installs all required project dependencies from package.json, including devDependencies. This ensures the environment is properly set up with all necessary libraries even when NODE_ENV=production.">npm install</button>
+                        <button class="btn btn-ghost btn-xs quick-cmd" data-cmd="git status" data-tooltip="Shows the current state of the working directory and the staging area. Use this to see which changes have been staged, which haven't, and which files aren't being tracked.">git status</button>
+                        <button class="btn btn-ghost btn-xs quick-cmd" data-cmd="git config user.name 'KWD Dev Agent' && git config user.email 'agent@kwd.dev'" data-tooltip="Configures the Git user name and email for the current repository. This ensures that any commits made by the agent are correctly attributed and avoid identity errors.">Setup Git Identity</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="clearTerminalBtn" class="btn btn-secondary">Clear Output</button>
+                <button id="closeTerminalBtn" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteConfirmModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete Client</h3>
+                <button class="modal-close" id="closeDeleteModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="delete-warning">
+                    <i data-lucide="alert-triangle" class="warning-icon"></i>
+                    <p>Are you sure you want to delete <strong id="deleteClientName"></strong>?</p>
+                    <p id="deleteWarningMessage" class="text-danger mt-sm hidden"></p>
+                    <p class="text-hint">This will permanently remove all files in the client folder. This action cannot be undone.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelDeleteBtn" class="btn btn-secondary">Cancel</button>
+                <button id="confirmDeleteBtn" class="btn btn-danger">
+                    <i data-lucide="trash-2"></i>
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Client Modal -->
+    <div id="addClientModal" class="modal-overlay hidden">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3 class="modal-title">Add New Client</h3>
+                <button class="modal-close" id="closeAddClientModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Tab Navigation -->
+                <div class="modal-tabs">
+                    <button class="modal-tab active" data-tab="github">
+                        <i data-lucide="github"></i>
+                        <span>Clone from GitHub</span>
+                    </button>
+                    <button class="modal-tab" data-tab="upload">
+                        <i data-lucide="upload"></i>
+                        <span>Upload Folder</span>
+                    </button>
+                </div>
+
+                <!-- GitHub Tab Content -->
+                <div id="githubTab" class="tab-content active">
+                    <div class="form-group">
+                        <label for="githubRepoUrl">GitHub Repository URL</label>
+                        <input type="text" id="githubRepoUrl" class="modal-input" placeholder="https://github.com/username/repo or username/repo">
+                        <span class="help-text">Enter the full URL or just username/repo-name</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="clientFolderName">Client Folder Name (optional)</label>
+                        <input type="text" id="clientFolderName" class="modal-input" placeholder="Leave empty to use repo name">
+                        <span class="help-text">The folder name for the client in client-websites/</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="githubToken">GitHub Token (for private repos)</label>
+                        <input type="password" id="githubToken" class="modal-input" placeholder="ghp_xxxxxxxxxxxx">
+                        <span class="help-text">Optional - only needed for private repositories</span>
+                    </div>
+                </div>
+
+                <!-- Upload Tab Content -->
+                <div id="uploadTab" class="tab-content">
+                    <div class="upload-zone" id="uploadZone">
+                        <i data-lucide="folder-up" class="upload-icon"></i>
+                        <p class="upload-title">Drag & drop a folder here</p>
+                        <p class="upload-subtitle">or click to select files</p>
+                        <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+                    </div>
+                    <div class="form-group mt-md">
+                        <label for="uploadFolderName">Client Folder Name</label>
+                        <input type="text" id="uploadFolderName" class="modal-input" placeholder="my-client-website">
+                        <span class="help-text">Required - the folder name for the client in client-websites/</span>
+                    </div>
+                    <div id="uploadProgress" class="upload-progress hidden">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="uploadProgressBar"></div>
+                        </div>
+                        <div id="uploadStatus" class="upload-status"></div>
+                    </div>
+                    <div id="selectedFiles" class="selected-files hidden">
+                        <h4>Selected Files:</h4>
+                        <ul id="fileList"></ul>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelAddClientBtn" class="btn btn-secondary">Cancel</button>
+                <button id="submitAddClientBtn" class="btn btn-primary">
+                    <i data-lucide="plus"></i>
+                    <span>Add Client</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="utils/formatting.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="clients.js"></script>
+</body>
+</html>
+

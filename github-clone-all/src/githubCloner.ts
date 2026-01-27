@@ -34,9 +34,6 @@ export class GitHubCloneAll {
    * Fetches all repositories for a user or organization
    */
   async getAllRepos(username: string, includePrivate: boolean = false): Promise<GitHubRepo[]> {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:36',message:'getAllRepos called',data:{username,includePrivate},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
 
     const repos: GitHubRepo[] = [];
     let page = 1;
@@ -48,9 +45,6 @@ export class GitHubCloneAll {
           ? `${this.baseUrl}/orgs/${username.split('/')[0]}/repos`
           : `${this.baseUrl}/users/${username}/repos`;
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:45',message:'Making GitHub API request',data:{url,page,hasToken:!!this.githubToken},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
 
         const response = await axios.get(url, {
           headers: {
@@ -64,9 +58,6 @@ export class GitHubCloneAll {
           },
         });
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:60',message:'GitHub API response received',data:{status:response.status,repoCount:response.data.length,page},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
 
         if (response.data.length === 0) {
           break;
@@ -84,9 +75,6 @@ export class GitHubCloneAll {
 
         page++;
       } catch (error: any) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:78',message:'GitHub API error',data:{errorMessage:error.message,status:error.response?.status,statusText:error.response?.statusText},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
 
         if (error.response?.status === 404) {
           throw new Error(`User or organization '${username}' not found`);
@@ -95,9 +83,6 @@ export class GitHubCloneAll {
       }
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:85',message:'getAllRepos completed',data:{totalRepos:repos.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
 
     return repos;
   }
@@ -113,17 +98,11 @@ export class GitHubCloneAll {
     currentIndex: number,
     total: number
   ): Promise<void> {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:88',message:'cloneOrUpdateRepo called',data:{repoName:repo.name,repoPath:path.join(targetDir, repo.name),useSSH,updateExisting},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-    // #endregion
 
     const repoPath = path.join(targetDir, repo.name);
 
     // Check if repo already exists
     if (fs.existsSync(repoPath)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:99',message:'Repository path already exists',data:{repoPath,updateExisting},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
 
       if (!updateExisting) {
         if (this.progressCallback) {
@@ -153,14 +132,8 @@ export class GitHubCloneAll {
         
         // Check if it's a git repo
         if (!fs.existsSync(path.join(repoPath, '.git'))) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:128',message:'Path exists but not a git repo, removing',data:{repoPath},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-          // #endregion
           await fs.remove(repoPath);
         } else {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:131',message:'Updating existing git repo',data:{repoPath},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-          // #endregion
           // Pull latest changes
           await git.fetch();
           await git.pull();
@@ -176,9 +149,6 @@ export class GitHubCloneAll {
           return;
         }
       } catch (error: any) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:145',message:'Error updating existing repo, removing',data:{repoPath,errorMessage:error.message,errorStack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
         await fs.remove(repoPath);
       }
     }
@@ -205,15 +175,9 @@ export class GitHubCloneAll {
 
     try {
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:162',message:'Attempting to clone repository',data:{repoName:repo.name,cloneUrl:cloneUrl.replace(this.githubToken,'[TOKEN]'),repoPath,useSSH,isPrivate:repo.private,hasToken:!!this.githubToken},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
 
       await simpleGit().clone(cloneUrl, repoPath, ['--recursive']);
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:165',message:'Clone successful',data:{repoName:repo.name,repoPath},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
 
       if (this.progressCallback) {
         this.progressCallback({
@@ -225,9 +189,6 @@ export class GitHubCloneAll {
         });
       }
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:178',message:'Clone failed with error',data:{repoName:repo.name,cloneUrl,errorMessage:error.message,errorStack:error.stack,errorName:error.name,errorCode:error.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
 
       if (this.progressCallback) {
         this.progressCallback({
@@ -281,36 +242,21 @@ export class GitHubCloneAll {
     let successCount = 0;
     let failCount = 0;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:272',message:'Starting clone loop',data:{totalRepos:filteredRepos.length,useSSH,includePrivate},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
 
     for (let i = 0; i < filteredRepos.length; i++) {
       const repo = filteredRepos[i];
       try {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:225',message:'Processing repo in loop',data:{index:i,total:filteredRepos.length,repoName:repo.name,isPrivate:repo.private,cloneUrl:repo.clone_url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
 
         await this.cloneOrUpdateRepo(repo, targetDir, useSSH, updateExisting, i, filteredRepos.length);
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:230',message:'Repo clone succeeded',data:{repoName:repo.name,successCount:successCount+1},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
 
         successCount++;
       } catch (error: any) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:235',message:'Repo clone failed in loop catch',data:{repoName:repo.name,errorMessage:error.message,errorStack:error.stack,errorName:error.name,failCount:failCount+1},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
 
         failCount++;
       }
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'githubCloner.ts:297',message:'Clone loop completed',data:{successCount,failCount,total:filteredRepos.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
 
     return {
       success: successCount,

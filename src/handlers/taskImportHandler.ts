@@ -10,6 +10,7 @@ export interface ImportTaskOptions {
   taskId: string;
   providedClientName?: string;
   triggerWorkflow?: boolean;
+  model?: string;
 }
 
 export interface ImportTaskResult {
@@ -19,6 +20,7 @@ export interface ImportTaskResult {
   clientName?: string;
   clientFolder?: string;
   workflowStarted?: boolean;
+  model?: string;
   error?: string;
   suggestions?: string[];
   warnings?: string[];
@@ -30,7 +32,7 @@ export interface ImportTaskResult {
  * Performs validation, saves task state, and optionally triggers workflow
  */
 export async function importTask(options: ImportTaskOptions): Promise<ImportTaskResult> {
-  const { taskId, providedClientName, triggerWorkflow = false } = options;
+  const { taskId, providedClientName, triggerWorkflow = false, model } = options;
 
   try {
     logger.info(`Starting import for task ${taskId}${providedClientName ? ` with client override: ${providedClientName}` : ''}`);
@@ -106,9 +108,10 @@ export async function importTask(options: ImportTaskOptions): Promise<ImportTask
       taskId: task.id,
       clientName,
       clientFolder,
+      model: model || config.cursor.defaultModel, // Store model preference
     });
 
-    logger.info(`Task ${task.id} state initialized: ${clientName} (${clientFolder})`);
+    logger.info(`Task ${task.id} state initialized: ${clientName} (${clientFolder})${model ? ` with model ${model}` : ''}`);
 
     // Step 5: Optionally trigger workflow if status matches
     let workflowStarted = false;
@@ -138,6 +141,7 @@ export async function importTask(options: ImportTaskOptions): Promise<ImportTask
       clientName,
       clientFolder,
       workflowStarted,
+      model: model || config.cursor.defaultModel,
       warnings,
       message: workflowStarted
         ? `Task imported successfully and workflow started`

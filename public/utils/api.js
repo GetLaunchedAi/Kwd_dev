@@ -10,9 +10,15 @@ class ApiClient {
 
     async request(endpoint, options = {}) {
         const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+        
+        // Add Authorization header if session token exists
+        const token = localStorage.getItem('clickup_session_token');
+        const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
+
         const config = {
             headers: {
                 'Content-Type': 'application/json',
+                ...authHeader,
                 ...options.headers,
             },
             ...options,
@@ -32,13 +38,21 @@ class ApiClient {
                         errorData = { error: errorText || `HTTP error! status: ${response.status}` };
                     }
                     
-                    // Don't retry on 4xx errors (client errors)
+                    const error = new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    error.status = response.status;
+                    
+                    // Don't retry on 4xx errors (client errors) - throw immediately without retry
                     if (response.status >= 400 && response.status < 500) {
-                        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                        throw error;
                     }
                     
-                    // Retry on 5xx errors (server errors)
-                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    // For 5xx errors, store and continue to retry logic
+                    lastError = error;
+                    if (attempt < this.retryAttempts - 1) {
+                        await this.delay(this.retryDelay * (attempt + 1));
+                        continue;
+                    }
+                    throw error;
                 }
 
                 const contentType = response.headers.get('content-type');
@@ -47,6 +61,11 @@ class ApiClient {
                 }
                 return await response.text();
             } catch (error) {
+                // Don't retry 4xx errors - they won't succeed on retry
+                if (error.status && error.status >= 400 && error.status < 500) {
+                    throw error;
+                }
+                
                 lastError = error;
                 
                 // Don't retry on network errors if it's the last attempt
@@ -87,8 +106,22 @@ class ApiClient {
         });
     }
 
-    async delete(endpoint, options = {}) {
-        return this.request(endpoint, { ...options, method: 'DELETE' });
+    async patch(endpoint, data, options = {}) {
+        return this.request(endpoint, {
+            ...options,
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async delete(endpoint, data = null, options = {}) {
+        // Support both api.delete('/endpoint') and api.delete('/endpoint', { body data })
+        // If data is provided and is an object (not null), include it as JSON body
+        const config = { ...options, method: 'DELETE' };
+        if (data && typeof data === 'object') {
+            config.body = JSON.stringify(data);
+        }
+        return this.request(endpoint, config);
     }
 
     delay(ms) {

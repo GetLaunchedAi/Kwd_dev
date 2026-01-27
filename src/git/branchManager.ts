@@ -2,32 +2,49 @@ import * as path from 'path';
 import simpleGit, { SimpleGit } from 'simple-git';
 import { config } from '../config/config';
 import { logger } from '../utils/logger';
-import { sanitizeBranchName } from '../utils/taskParser';
 
 /**
- * Creates a feature branch for the task
+ * Ensures a development branch exists and checks it out.
+ * If it doesn't exist, it creates it from the default branch.
  */
-export async function createFeatureBranch(
-  folderPath: string,
-  taskId: string,
-  taskName: string
+export async function ensureDevBranch(
+  folderPath: string
 ): Promise<string> {
-  logger.info(`Creating feature branch for task ${taskId}`);
+  const branchName = config.git.devBranch || 'main';
+  logger.info(`Ensuring branch ${branchName} exists in ${folderPath}`);
   
   const git: SimpleGit = simpleGit(folderPath);
-  const branchName = `clickup/${taskId}-${sanitizeBranchName(taskName)}`;
   
   try {
-    // Ensure we're on the default branch first
-    await git.checkout(config.git.defaultBranch);
+    // Check if branch exists
+    const branches = await git.branchLocal();
+    const exists = branches.all.includes(branchName);
     
-    // Create and checkout new branch
-    await git.checkoutLocalBranch(branchName);
+    if (exists) {
+      logger.info(`Branch ${branchName} already exists, checking it out`);
+      await git.checkout(branchName);
+      
+      // Pull latest from origin if it exists on remote
+      try {
+        await git.pull('origin', branchName);
+      } catch (pullError: any) {
+        logger.warn(`Could not pull latest for ${branchName}: ${pullError.message}`);
+      }
+    } else {
+      logger.info(`Branch ${branchName} does not exist, creating from ${config.git.defaultBranch}`);
+      
+      // Ensure we're on the default branch first and it's up to date
+      await git.checkout(config.git.defaultBranch);
+      await git.pull('origin', config.git.defaultBranch);
+      
+      // Create and checkout new branch
+      await git.checkoutLocalBranch(branchName);
+      logger.info(`Created and checked out branch: ${branchName}`);
+    }
     
-    logger.info(`Created and checked out branch: ${branchName}`);
     return branchName;
   } catch (error: any) {
-    logger.error(`Error creating branch: ${error.message}`);
+    logger.error(`Error ensuring branch ${branchName}: ${error.message}`);
     throw error;
   }
 }
@@ -89,17 +106,19 @@ export async function getCurrentBranch(folderPath: string): Promise<string> {
 }
 
 /**
- * Gets git diff between two branches/commits
+ * Gets git diff between two branches/commits.
+ * If 'to' is not provided, it compares 'from' against the current working directory.
  */
 export async function getDiff(
   folderPath: string,
   from: string,
-  to: string = 'HEAD'
+  to?: string
 ): Promise<string> {
   const git: SimpleGit = simpleGit(folderPath);
   
   try {
-    const diff = await git.diff([from, to]);
+    const args = to ? [from, to] : [from];
+    const diff = await git.diff(args);
     return diff;
   } catch (error: any) {
     logger.error(`Error getting diff: ${error.message}`);

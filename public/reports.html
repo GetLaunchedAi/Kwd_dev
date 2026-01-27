@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Reports - KWD Dev</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .reports-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+            margin-top: 24px;
+        }
+        @media (max-width: 992px) {
+            .reports-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .report-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-main);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .report-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .report-card-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .uptime-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .uptime-stat-item {
+            background: var(--bg-input);
+            padding: 16px;
+            border-radius: var(--radius-md);
+            text-align: center;
+        }
+        .uptime-stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .uptime-stat-value {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--color-primary);
+        }
+        .uptime-stat-unknown {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            margin-top: 4px;
+        }
+        .latest-runs-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .run-item {
+            background: var(--bg-input);
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid var(--border-main);
+        }
+        .run-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .run-date {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .run-summary {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .run-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .schedule-config {
+            background: var(--bg-input);
+            padding: 16px;
+            border-radius: var(--radius-md);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .schedule-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .schedule-label {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .schedule-value {
+            flex: 1;
+            text-align: right;
+        }
+        .select-cadence {
+            padding: 6px 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-main);
+            background: var(--bg-card);
+            color: var(--text-main);
+        }
+        .job-status-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+            border-radius: var(--radius-lg);
+            gap: 12px;
+            backdrop-filter: blur(2px);
+        }
+        .dark-theme .job-status-overlay {
+            background: rgba(15, 23, 42, 0.8);
+        }
+        .score-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 800;
+            font-size: 12px;
+        }
+        .score-good { background: var(--color-success-soft); color: var(--color-success); }
+        .score-average { background: var(--color-warning-soft); color: var(--color-warning); }
+        .score-poor { background: var(--color-danger-soft); color: var(--color-danger); }
+        
+        .domain-unconfigured {
+            padding: 24px;
+            background: var(--color-warning-soft);
+            border: 1px solid var(--color-warning-light);
+            border-radius: var(--radius-md);
+            text-align: center;
+            color: var(--color-warning);
+        }
+    </style>
+</head>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+                <div id="connectionStatus" class="connection-status">
+                    <span class="status-indicator status-offline" id="statusIndicator"></span>
+                    <span id="statusText">Offline</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item active">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-nav">
+                    <a href="/clients.html" class="back-link" title="Back to Clients">
+                        <i data-lucide="arrow-left"></i>
+                    </a>
+                    <div class="header-title-wrapper">
+                        <h1 id="pageTitle">Site Reports</h1>
+                    </div>
+                </div>
+
+                <div class="header-actions">
+                    <select id="siteSelector" class="sort-select" style="min-width: 200px;">
+                        <option value="">Select a Site...</option>
+                    </select>
+                    <button id="refreshDataBtn" class="btn btn-primary btn-sm">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Refresh</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div id="noSiteSelected" class="empty-state">
+                    <div class="empty-state-visual">
+                        <i data-lucide="bar-chart-2"></i>
+                    </div>
+                    <h2 class="empty-state-title">No site selected</h2>
+                    <p class="empty-state-message">Please select a site from the dropdown to view reports and uptime data.</p>
+                </div>
+
+                <div id="reportsContent" class="hidden">
+                    <!-- Uptime Section -->
+                    <section class="report-card">
+                        <div class="report-card-header">
+                            <h2 class="report-card-title">
+                                <i data-lucide="activity"></i> Uptime Monitoring
+                            </h2>
+                            <div id="lastChecked" class="text-hint">Last checked: Never</div>
+                        </div>
+                        
+                        <div id="uptimeUnconfigured" class="domain-unconfigured hidden">
+                            <i data-lucide="alert-triangle"></i>
+                            <p class="mt-sm">Domain not configured for this site. Uptime monitoring is disabled.</p>
+                            <a href="#" id="editDomainLink" class="btn btn-ghost btn-sm mt-md">How to configure domain</a>
+                        </div>
+
+                        <div id="uptimeStats" class="uptime-stats">
+                            <div class="uptime-stat-item">
+                                <div class="uptime-stat-label">Last 24 Hours</div>
+                                <div id="uptime24h" class="uptime-stat-value">--%</div>
+                                <div id="unknown24h" class="uptime-stat-unknown">Unknown: --</div>
+                            </div>
+                            <div class="uptime-stat-item">
+                                <div class="uptime-stat-label">Last 7 Days</div>
+                                <div id="uptime7d" class="uptime-stat-value">--%</div>
+                                <div id="unknown7d" class="uptime-stat-unknown">Unknown: --</div>
+                            </div>
+                        </div>
+                        
+                        <div class="schedule-row">
+                            <div class="schedule-label">Average Latency (24h)</div>
+                            <div id="avgLatency" class="schedule-value">--ms</div>
+                        </div>
+                    </section>
+
+                    <div class="reports-grid">
+                        <!-- Performance Reports -->
+                        <section class="report-card" id="performanceCard" style="position: relative;">
+                            <div class="report-card-header">
+                                <h2 class="report-card-title">
+                                    <i data-lucide="zap"></i> Performance
+                                </h2>
+                                <button id="runPerfBtn" class="btn btn-primary btn-sm">
+                                    <i data-lucide="play"></i> Run Now
+                                </button>
+                            </div>
+                            
+                            <div id="perfJobOverlay" class="job-status-overlay hidden">
+                                <div class="spinner"></div>
+                                <p id="perfJobStatus">Running Lighthouse scan...</p>
+                            </div>
+
+                            <div class="schedule-config">
+                                <div class="schedule-row">
+                                    <div class="schedule-label">Automatic Schedule</div>
+                                    <div class="schedule-value">
+                                        <select id="perfCadence" class="select-cadence">
+                                            <option value="off">Off</option>
+                                            <option value="biweekly">Bi-weekly</option>
+                                            <option value="monthly">Monthly</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="perfNextRun" class="text-hint" style="text-align: right;">Next run: Not scheduled</div>
+                            </div>
+
+                            <div class="latest-runs-section">
+                                <h3 class="mb-sm" style="font-size: 14px;">Latest Performance Report</h3>
+                                <div id="latestPerfRun" class="latest-runs-list">
+                                    <div class="text-hint">No reports generated yet.</div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Security Reports -->
+                        <section class="report-card" id="securityCard" style="position: relative;">
+                            <div class="report-card-header">
+                                <h2 class="report-card-title">
+                                    <i data-lucide="shield"></i> Security
+                                </h2>
+                                <button id="runSecBtn" class="btn btn-primary btn-sm">
+                                    <i data-lucide="play"></i> Run Now
+                                </button>
+                            </div>
+                            
+                            <div id="secJobOverlay" class="job-status-overlay hidden">
+                                <div class="spinner"></div>
+                                <p id="secJobStatus">Running security audit...</p>
+                            </div>
+
+                            <div class="schedule-config">
+                                <div class="schedule-row">
+                                    <div class="schedule-label">Automatic Schedule</div>
+                                    <div class="schedule-value">
+                                        <select id="secCadence" class="select-cadence">
+                                            <option value="off">Off</option>
+                                            <option value="biweekly">Bi-weekly</option>
+                                            <option value="monthly">Monthly</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="secNextRun" class="text-hint" style="text-align: right;">Next run: Not scheduled</div>
+                            </div>
+
+                            <div class="latest-runs-section">
+                                <h3 class="mb-sm" style="font-size: 14px;">Latest Security Report</h3>
+                                <div id="latestSecRun" class="latest-runs-list">
+                                    <div class="text-hint">No reports generated yet.</div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Share Link Modal -->
+    <div id="shareModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Share Report</h3>
+                <button class="modal-close" id="closeShareModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Anyone with this link can view the report artifacts. The link will expire after the chosen duration.</p>
+                
+                <div class="form-group mt-md">
+                    <label>Expires in:</label>
+                    <select id="shareExpiry" class="modal-input">
+                        <option value="1">1 Day</option>
+                        <option value="7" selected>7 Days</option>
+                        <option value="30">30 Days</option>
+                        <option value="0">Never (Use with caution)</option>
+                    </select>
+                </div>
+
+                <div id="shareLinkContainer" class="hidden mt-lg">
+                    <label>Share URL:</label>
+                    <div class="input-group">
+                        <input type="text" id="shareUrlInput" class="modal-input flex-grow" readonly>
+                        <button id="copyShareUrlBtn" class="btn btn-secondary">Copy</button>
+                    </div>
+                    <p class="text-hint mt-sm" id="shareExpiresAt"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelShareBtn" class="btn btn-secondary">Cancel</button>
+                <button id="generateShareBtn" class="btn btn-primary">Generate Link</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="utils/formatting.js"></script>
+    <script src="reports.js"></script>
+</body>
+</html>
+
+
+
+

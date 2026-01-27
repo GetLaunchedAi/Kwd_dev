@@ -99,7 +99,8 @@ async function findClosestMatches(extractedName: string, maxResults: number = 5)
  */
 async function validateClientName(clientName: string): Promise<{ isValid: boolean; actualName?: string }> {
   const folderInfo = await findClientFolder(clientName);
-  if (folderInfo && folderInfo.isValid) {
+  // Allow folder even if it's not a git repo - we can initialize it later
+  if (folderInfo) {
     return { isValid: true, actualName: folderInfo.name };
   }
   return { isValid: false };
@@ -172,25 +173,31 @@ export async function extractClientName(
     }
   }
 
-  // Step 2: Check folder name as high-priority fallback
-  if (fullTask?.folder?.name) {
-    const folderName = fullTask.folder.name;
-    logger.debug(`Checking ClickUp folder name as fallback: ${folderName}`);
+  // Step 2: Check ClickUp hierarchy (Folder, List, Space) as high-priority fallback
+  const hierarchyNames = [
+    fullTask?.folder?.name,
+    fullTask?.list?.name,
+    fullTask?.project?.name,
+    fullTask?.space?.name
+  ].filter(Boolean) as string[];
+
+  for (const name of hierarchyNames) {
+    logger.debug(`Checking ClickUp hierarchy name: ${name}`);
     
-    // Try the folder name directly
-    let validation = await validateClientName(folderName);
+    // Try the name directly
+    let validation = await validateClientName(name);
     if (validation.isValid) {
       return {
-        clientName: validation.actualName || folderName,
+        clientName: validation.actualName || name,
         confidence: 'high',
         validated: true,
         method: 'folder',
       };
     }
 
-    // Try hyphenated version of folder name (e.g., "Jacks Roofing LLC" -> "jacks-roofing-llc")
-    const hyphenatedName = folderName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    logger.debug(`Trying hyphenated folder name: ${hyphenatedName}`);
+    // Try hyphenated version (e.g., "Jacks Roofing LLC" -> "jacks-roofing-llc")
+    const hyphenatedName = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    logger.debug(`Trying hyphenated hierarchy name: ${hyphenatedName}`);
     validation = await validateClientName(hyphenatedName);
     if (validation.isValid) {
       return {
@@ -201,10 +208,11 @@ export async function extractClientName(
       };
     }
     
-    // Try without common suffixes like "LLC"
-    const cleanedName = folderName.replace(/\s+LLC$/i, '').trim();
-    if (cleanedName !== folderName) {
-      const hyphenatedCleaned = cleanedName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    // Try without common suffixes like "LLC", "Inc", etc. and hyphenate
+    const cleanedName = name.replace(/\s+(LLC|Inc|Corp|Group|Company|Agency)$/i, '').trim();
+    const hyphenatedCleaned = cleanedName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    
+    if (hyphenatedCleaned !== hyphenatedName) {
       logger.debug(`Trying cleaned hyphenated name: ${hyphenatedCleaned}`);
       validation = await validateClientName(hyphenatedCleaned);
       if (validation.isValid) {
@@ -221,10 +229,11 @@ export async function extractClientName(
   // Step 3: Check pattern mappings
   const patternMatch = await checkPatternMappings(taskName);
   if (patternMatch) {
-    const validation = await validateClientName(patternMatch);
+    const hyphenatedPatternMatch = patternMatch.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const validation = await validateClientName(hyphenatedPatternMatch);
     if (validation.isValid) {
       return {
-        clientName: validation.actualName || patternMatch,
+        clientName: validation.actualName || hyphenatedPatternMatch,
         confidence: 'high',
         validated: true,
         method: 'pattern',
@@ -252,18 +261,19 @@ export async function extractClientName(
   // Step 4: Enhanced pattern extraction
   const extractedName = await extractWithEnhancedPatterns(taskName);
   if (extractedName) {
-    const validation = await validateClientName(extractedName);
+    const hyphenatedExtracted = extractedName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const validation = await validateClientName(hyphenatedExtracted);
     if (validation.isValid) {
       return {
-        clientName: validation.actualName || extractedName,
+        clientName: validation.actualName || hyphenatedExtracted,
         confidence: 'medium',
         validated: true,
       };
     } else {
       // Found a name but it doesn't match a folder - get suggestions
-      const suggestions = await findClosestMatches(extractedName);
+      const suggestions = await findClosestMatches(hyphenatedExtracted);
       return {
-        clientName: extractedName,
+        clientName: hyphenatedExtracted,
         confidence: 'low',
         validated: false,
         suggestions,
@@ -277,7 +287,8 @@ export async function extractClientName(
   
   for (const word of words) {
     if (word.length > 2 && /^[A-Z][a-zA-Z0-9\-]+$/.test(word)) {
-      candidates.push(word);
+      const hyphenatedWord = word.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      candidates.push(hyphenatedWord);
     }
   }
 

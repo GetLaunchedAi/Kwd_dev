@@ -9,23 +9,165 @@ let autoRefreshInterval = null;
 let isAutoRefreshPaused = false;
 let lastUpdateTime = null;
 let connectionPollingInterval = null;
+let webhookPollingInterval = null;
+let queuePollingInterval = null;
+let lastQueueOverview = null;
+/**
+ * Deep equality check that properly handles nested objects and arrays.
+ * More reliable than JSON.stringify which fails on property reordering.
+ * @param {any} obj1 
+ * @param {any} obj2 
+ * @returns {boolean}
+ */
+function deepEqual(obj1, obj2) {
+    if (obj1 === obj2) return true;
+    
+    if (obj1 == null || obj2 == null) return obj1 === obj2;
+    
+    if (typeof obj1 !== 'object' || typeof obj2 !== 'object') return obj1 === obj2;
+    
+    if (Array.isArray(obj1) !== Array.isArray(obj2)) return false;
+    
+    const keys1 = Object.keys(obj1);
+    const keys2 = Object.keys(obj2);
+    
+    if (keys1.length !== keys2.length) return false;
+    
+    for (const key of keys1) {
+        if (!keys2.includes(key)) return false;
+        if (!deepEqual(obj1[key], obj2[key])) return false;
+    }
+    
+    return true;
+}
+
+// ===== Demo Detection Helpers =====
+
+/**
+ * Checks if a taskId represents a demo step task (not the base demo).
+ * Pattern: demo-{slug}-step{N} where N is 2, 3, or 4
+ * @param {string} taskId 
+ * @returns {boolean}
+ */
+function isDemoStepTask(taskId) {
+    return /^demo-.+-step\d+$/.test(taskId);
+}
+
+/**
+ * Checks if a taskId represents a base demo task.
+ * Pattern: demo-{slug} but NOT demo-{slug}-stepN
+ * @param {string} taskId 
+ * @returns {boolean}
+ */
+function isBaseDemoTask(taskId) {
+    return taskId.startsWith('demo-') && !isDemoStepTask(taskId);
+}
+
+/**
+ * Extracts the client slug from a demo task ID.
+ * demo-sunny-plumbing -> sunny-plumbing
+ * @param {string} taskId 
+ * @returns {string}
+ */
+function extractSlugFromDemoTaskId(taskId) {
+    return taskId.replace(/^demo-/, '');
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize icons
+    if (window.lucide) lucide.createIcons();
+    
+    // Theme toggle
+    initTheme();
+    
+    // Check for client filter in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const clientParam = urlParams.get('client');
+    if (clientParam) {
+        searchQuery = clientParam.toLowerCase();
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) searchInput.value = clientParam;
+        
+        // Update header title to show we're filtering by client
+        const headerTitle = document.querySelector('.header-title h1');
+        if (headerTitle) headerTitle.textContent = `Dashboard: ${clientParam}`;
+        
+        // Add a clear button to the header
+        const headerActions = document.querySelector('.header-actions');
+        if (headerActions) {
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'btn btn-ghost btn-sm mr-sm';
+            clearBtn.innerHTML = '<i data-lucide="x-circle"></i> <span>Clear Filter</span>';
+            clearBtn.onclick = () => {
+                window.location.href = '/index.html';
+            };
+            headerActions.prepend(clearBtn);
+        }
+    }
+    
     loadTasks();
     startConnectionPolling();
     loadFailedImports();
+    loadWebhookStatus();
+    startWebhookStatusPolling();
+    loadAvailableModelsForImport();
+    loadQueueStatus();
+    startQueuePolling();
     
     // Refresh button
     document.getElementById('refreshBtn')?.addEventListener('click', () => {
         loadTasks({ showNotification: true });
     });
 
+    // Theme toggle button
+    document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
+
+    // Git check button
+    document.getElementById('checkGitBtn')?.addEventListener('click', async () => {
+        const checkGitBtn = document.getElementById('checkGitBtn');
+        const originalIcon = checkGitBtn.innerHTML;
+        checkGitBtn.disabled = true;
+        checkGitBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i>';
+        if (window.lucide) lucide.createIcons();
+
+        try {
+            const response = await fetch('/api/git/status');
+            const data = await response.json();
+            
+            if (response.ok) {
+                notifications.success('Git is working correctly');
+            } else {
+                notifications.error(`git isnt working: ${data.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            notifications.error(`git isnt working: ${error.message}`);
+        } finally {
+            checkGitBtn.disabled = false;
+            checkGitBtn.innerHTML = originalIcon;
+            if (window.lucide) lucide.createIcons();
+        }
+    });
+
+    // Webhook toggle button
+    document.getElementById('webhookToggleBtn')?.addEventListener('click', toggleWebhook);
+
     // Pause/resume auto-refresh
     const pauseBtn = document.getElementById('pauseRefreshBtn');
     pauseBtn?.addEventListener('click', () => {
         isAutoRefreshPaused = !isAutoRefreshPaused;
-        pauseBtn.textContent = isAutoRefreshPaused ? 'Resume' : 'Pause';
+        
+        // Update icon
+        pauseBtn.innerHTML = isAutoRefreshPaused 
+            ? '<i data-lucide="play"></i>' 
+            : '<i data-lucide="pause"></i>';
+        
+        // Update tooltip
+        pauseBtn.title = isAutoRefreshPaused ? 'Resume auto-refresh' : 'Pause auto-refresh';
+        
+        // Refresh icons
+        if (window.lucide) lucide.createIcons();
+        
         if (isAutoRefreshPaused) {
             stopAutoRefresh();
         } else {
@@ -70,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
         importIncompleteBtn.textContent = 'Importing...';
 
         try {
-            const results = await api.post('/tasks/import-incomplete');
+            const results = await api.post('/tasks/import-incomplete', {});
             notifications.success(`Bulk import completed: ${results.imported} tasks imported, ${results.skipped} skipped, ${results.errors.length} errors.`);
             
             if (results.errors.length > 0) {
@@ -122,8 +264,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const taskIds = failures.map(f => f.taskId);
         
         retryAllFailedBtn.disabled = true;
-        const originalText = retryAllFailedBtn.textContent;
-        retryAllFailedBtn.textContent = 'Retrying...';
+        const originalHtml = retryAllFailedBtn.innerHTML;
+        retryAllFailedBtn.innerHTML = '<span class="spinner-sm"></span> Retrying...';
 
         try {
             const results = await api.post('/tasks/retry-import', { taskIds });
@@ -135,7 +277,8 @@ document.addEventListener('DOMContentLoaded', () => {
             notifications.error(`Retry failed: ${error.message}`);
         } finally {
             retryAllFailedBtn.disabled = false;
-            retryAllFailedBtn.textContent = originalText;
+            retryAllFailedBtn.innerHTML = originalHtml;
+            if (window.lucide) lucide.createIcons();
         }
     });
 
@@ -220,9 +363,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const clientName = clientNameInput?.value.trim() || undefined;
             const queryParams = clientName ? `?clientName=${encodeURIComponent(clientName)}` : '';
             
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/d494afa8-946f-47d4-9935-30e65c9d5f53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'public/app.js:preview',message:'Calling preview API',data:{taskId,queryParams},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-            // #endregion
 
             const preview = await api.get(`/tasks/import/preview/${taskId}${queryParams}`);
 
@@ -294,15 +434,14 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const clientName = clientNameInput?.value.trim() || undefined;
             const triggerWorkflow = triggerWorkflowCheckbox?.checked || false;
-            
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/d494afa8-946f-47d4-9935-30e65c9d5f53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'public/app.js:import',message:'Calling import API',data:{taskId,clientName,triggerWorkflow},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-            // #endregion
+            const importModelSelect = document.getElementById('importModelSelect');
+            const model = importModelSelect?.value || undefined;
 
             const result = await api.post('/tasks/import', { 
                 taskId,
                 clientName,
-                triggerWorkflow 
+                triggerWorkflow,
+                model
             });
 
             let successMsg = `Task ${taskId} imported successfully!`;
@@ -347,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Delete All Tasks button and modal
     const deleteAllBtn = document.getElementById('deleteAllTasksBtn');
+    const clearQueueBtn = document.getElementById('clearQueueBtn');
     const deleteAllModal = document.getElementById('deleteAllModal');
     const closeDeleteAllModal = document.getElementById('closeDeleteAllModal');
     const cancelDeleteAllBtn = document.getElementById('cancelDeleteAllBtn');
@@ -366,6 +506,141 @@ document.addEventListener('DOMContentLoaded', () => {
         deleteAllModal.classList.remove('hidden');
         setTimeout(() => deleteAllModal.classList.add('show'), 10);
         deleteAllError.classList.add('hidden');
+    });
+
+    clearQueueBtn?.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to clear the agent queue? This will remove all pending tasks that have not started running yet.')) {
+            return;
+        }
+
+        clearQueueBtn.disabled = true;
+        const originalIcon = clearQueueBtn.innerHTML;
+        clearQueueBtn.innerHTML = '<div class="spinner-sm"></div>';
+
+        try {
+            const result = await api.delete('/cursor/queue');
+            if (result.success) {
+                notifications.success(`Successfully cleared ${result.cleared} task(s) from the queue`);
+                // Refresh tasks list and queue status
+                await loadTasks({ showNotification: false });
+                await loadQueueStatus();
+            } else {
+                throw new Error(result.error || 'Unknown error');
+            }
+        } catch (error) {
+            notifications.error(`Failed to clear agent queue: ${error.message}`);
+        } finally {
+            clearQueueBtn.disabled = false;
+            clearQueueBtn.innerHTML = originalIcon;
+            if (window.lucide) lucide.createIcons();
+        }
+    });
+
+    // Queue Viewer Modal
+    const viewQueueBtn = document.getElementById('viewQueueBtn');
+    const queueModal = document.getElementById('queueModal');
+    const closeQueueModal = document.getElementById('closeQueueModal');
+    const closeQueueModalBtn = document.getElementById('closeQueueModalBtn');
+    const refreshQueueBtn = document.getElementById('refreshQueueBtn');
+    const unstickQueueBtn = document.getElementById('unstickQueueBtn');
+    const clearAllQueuesBtn = document.getElementById('clearAllQueuesBtn');
+
+    viewQueueBtn?.addEventListener('click', async () => {
+        queueModal.classList.remove('hidden');
+        setTimeout(() => queueModal.classList.add('show'), 10);
+        await loadQueueOverview();
+    });
+
+    function closeQueueModalFn() {
+        queueModal.classList.remove('show');
+        setTimeout(() => queueModal.classList.add('hidden'), 300);
+    }
+
+    closeQueueModal?.addEventListener('click', closeQueueModalFn);
+    closeQueueModalBtn?.addEventListener('click', closeQueueModalFn);
+    queueModal?.addEventListener('click', (e) => {
+        if (e.target === queueModal) {
+            closeQueueModalFn();
+        }
+    });
+
+    refreshQueueBtn?.addEventListener('click', async () => {
+        refreshQueueBtn.disabled = true;
+        refreshQueueBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Refreshing...';
+        if (window.lucide) lucide.createIcons();
+        
+        try {
+            await loadQueueOverview();
+            notifications.success('Queue status refreshed');
+        } catch (error) {
+            notifications.error(`Failed to refresh queue: ${error.message}`);
+        } finally {
+            refreshQueueBtn.disabled = false;
+            refreshQueueBtn.innerHTML = '<i data-lucide="refresh-cw"></i> Refresh';
+            if (window.lucide) lucide.createIcons();
+        }
+    });
+
+    unstickQueueBtn?.addEventListener('click', async () => {
+        if (!confirm('This will force-move any stuck running tasks to failed. Continue?')) {
+            return;
+        }
+
+        unstickQueueBtn.disabled = true;
+        unstickQueueBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Unsticking...';
+        if (window.lucide) lucide.createIcons();
+
+        try {
+            const result = await api.post('/cursor/queue/unstick', {});
+            if (result.success) {
+                if (result.unstuck.length > 0) {
+                    notifications.success(`Unstuck ${result.unstuck.length} task(s): ${result.unstuck.join(', ')}`);
+                } else {
+                    notifications.info('No stuck tasks found to unstick');
+                }
+                if (result.errors.length > 0) {
+                    notifications.warning(`Some errors: ${result.errors.join(', ')}`);
+                }
+                await loadQueueOverview();
+                await loadTasks({ showNotification: false });
+            } else {
+                throw new Error(result.error || 'Unknown error');
+            }
+        } catch (error) {
+            notifications.error(`Failed to unstick queue: ${error.message}`);
+        } finally {
+            unstickQueueBtn.disabled = false;
+            unstickQueueBtn.innerHTML = '<i data-lucide="unlock"></i> Unstick Running';
+            if (window.lucide) lucide.createIcons();
+        }
+    });
+
+    clearAllQueuesBtn?.addEventListener('click', async () => {
+        if (!confirm('⚠️ DANGER: This will clear ALL queue data including running, done, and failed tasks. This is a nuclear option for recovery. Continue?')) {
+            return;
+        }
+
+        clearAllQueuesBtn.disabled = true;
+        clearAllQueuesBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Clearing...';
+        if (window.lucide) lucide.createIcons();
+
+        try {
+            const result = await api.delete('/cursor/queue/all');
+            if (result.success) {
+                const { cleared } = result;
+                notifications.success(`Cleared all queues: ${cleared.queued} queued, ${cleared.running} running, ${cleared.done} done, ${cleared.failed} failed`);
+                await loadQueueOverview();
+                await loadTasks({ showNotification: false });
+            } else {
+                throw new Error(result.error || 'Unknown error');
+            }
+        } catch (error) {
+            notifications.error(`Failed to clear all queues: ${error.message}`);
+        } finally {
+            clearAllQueuesBtn.disabled = false;
+            clearAllQueuesBtn.innerHTML = '<i data-lucide="trash-2"></i> Clear All';
+            if (window.lucide) lucide.createIcons();
+        }
     });
 
     function closeDeleteAllModalFn() {
@@ -485,18 +760,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+        // Skip keyboard shortcuts when focus is in any form element or when modals are open
+        const isFormElement = ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(e.target.tagName);
+        const isContentEditable = e.target.isContentEditable;
+        const isModalOpen = document.querySelector('.modal-overlay.show') !== null;
+        
+        if (isFormElement || isContentEditable || isModalOpen) {
+            return;
+        }
+        
         // R key for refresh (when not typing in input)
-        if (e.key === 'r' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        if (e.key === 'r' || e.key === 'R') {
             e.preventDefault();
             loadTasks({ showNotification: true });
         }
         // / key to focus search
-        if (e.key === '/' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        if (e.key === '/') {
             e.preventDefault();
-            searchInput.focus();
+            searchInput?.focus();
         }
     });
 });
+
+// Theme Management - Using centralized ThemeUtils from theme.js
 
 async function loadTasks(options = {}) {
     const { showNotification = false, silent = false } = options;
@@ -519,7 +805,7 @@ async function loadTasks(options = {}) {
         const data = await api.get('/tasks');
         
         // Check if data has changed
-        const hasChanged = JSON.stringify(data) !== JSON.stringify(allTasks);
+        const hasChanged = !deepEqual(data, allTasks);
         
         if (hasChanged || !silent) {
             allTasks = data;
@@ -570,8 +856,15 @@ function startAutoRefresh() {
     const indicator = document.getElementById('autoRefreshIndicator');
     const pauseBtn = document.getElementById('pauseRefreshBtn');
     
-    indicator.classList.remove('hidden');
-    pauseBtn.classList.remove('hidden');
+    indicator?.classList.remove('hidden');
+    pauseBtn?.classList.remove('hidden');
+    
+    // Ensure correct icon and title
+    if (pauseBtn) {
+        pauseBtn.innerHTML = '<i data-lucide="pause"></i>';
+        pauseBtn.title = 'Pause auto-refresh';
+        if (window.lucide) lucide.createIcons();
+    }
     
     autoRefreshInterval = setInterval(() => {
         if (!isAutoRefreshPaused && document.visibilityState === 'visible') {
@@ -589,13 +882,20 @@ function stopAutoRefresh() {
     const indicator = document.getElementById('autoRefreshIndicator');
     const pauseBtn = document.getElementById('pauseRefreshBtn');
     
-    indicator.classList.add('hidden');
-    pauseBtn.classList.add('hidden');
+    indicator?.classList.add('hidden');
+    
+    // Only hide the pause button if we're not manually paused
+    if (!isAutoRefreshPaused) {
+        pauseBtn?.classList.add('hidden');
+    }
 }
 
 function updateFilterBadges() {
     const filterSelect = document.getElementById('filterSelect');
     if (!filterSelect) return;
+    
+    // Filter out demo step tasks for accurate counts
+    const visibleTasks = allTasks.filter(task => !isDemoStepTask(task.taskId));
     
     const filters = [
         { value: 'all', label: 'All Tasks' },
@@ -611,9 +911,9 @@ function updateFilterBadges() {
         
         let count = 0;
         if (value === 'all') {
-            count = allTasks.length;
+            count = visibleTasks.length;
         } else {
-            count = allTasks.filter(task => task.state === value).length;
+            count = visibleTasks.filter(task => task.state === value).length;
         }
         
         // Update option text with count
@@ -621,12 +921,43 @@ function updateFilterBadges() {
     });
 }
 
+/**
+ * Handles task card click navigation via event delegation.
+ * Using a single delegated handler prevents memory leaks from re-adding listeners.
+ */
+function handleTaskCardClick(e) {
+    const card = e.target.closest('.task-card');
+    if (!card) return;
+    
+    // Don't navigate if clicking on a button or link
+    if (e.target.closest('button') || e.target.closest('a')) {
+        return;
+    }
+    
+    const taskId = card.dataset.taskId;
+    if (!taskId) return;
+    
+    // Route demos to demo.html, regular tasks to task.html
+    if (isBaseDemoTask(taskId)) {
+        const slug = card.dataset.slug || extractSlugFromDemoTaskId(taskId);
+        window.location.href = `/demo.html?slug=${slug}`;
+    } else {
+        window.location.href = `/task.html?taskId=${taskId}`;
+    }
+}
+
+// Track if delegated listener is attached to prevent duplicates
+let tasksListDelegatedListenerAttached = false;
+
 function renderTasks() {
     const tasksList = document.getElementById('tasksList');
     const emptyState = document.getElementById('emptyState');
     
     // Filter tasks
     let filteredTasks = allTasks;
+    
+    // Filter out demo step tasks (keep only base demos, e.g., demo-sunny-plumbing not demo-sunny-plumbing-step2)
+    filteredTasks = filteredTasks.filter(task => !isDemoStepTask(task.taskId));
     
     // Apply state filter
     if (currentFilter !== 'all') {
@@ -663,47 +994,77 @@ function renderTasks() {
         emptyState.classList.add('hidden');
         tasksList.innerHTML = filteredTasks.map(task => createTaskCard(task)).join('');
         
-        // Add click handlers
-        document.querySelectorAll('.task-card').forEach(card => {
-            card.addEventListener('click', (e) => {
-                // Don't navigate if clicking on a button or link
-                if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') {
-                    return;
-                }
-                const taskId = card.dataset.taskId;
-                window.location.href = `/task.html?taskId=${taskId}`;
-            });
-        });
+        // Initialize icons for new cards
+        if (window.lucide) lucide.createIcons();
+
+        // Use event delegation - attach listener once to container, not to each card
+        // This prevents memory leaks from re-adding listeners on each render
+        if (!tasksListDelegatedListenerAttached) {
+            tasksList.addEventListener('click', handleTaskCardClick);
+            tasksListDelegatedListenerAttached = true;
+        }
     }, 10);
 }
 
 function sortTasks(tasks, sortBy) {
+    // Validate input parameters to prevent crashes
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+        return tasks || [];
+    }
+    
+    if (!sortBy || typeof sortBy !== 'string') {
+        return tasks;
+    }
+    
     const [field, direction] = sortBy.split('_');
+    if (!field || !direction) {
+        return tasks;
+    }
+    
     const sorted = [...tasks];
+    
+    /**
+     * Safely parse a date value, returning 0 for invalid/null dates.
+     * This ensures consistent sorting behavior when dates are missing.
+     */
+    const safeParseDate = (dateVal) => {
+        if (dateVal === null || dateVal === undefined) return 0;
+        const parsed = new Date(dateVal);
+        return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+    };
+    
+    /**
+     * Safely extract string value with fallback to empty string.
+     * Handles null, undefined, and non-string types.
+     */
+    const safeString = (val) => {
+        if (val === null || val === undefined) return '';
+        return String(val).toLowerCase();
+    };
     
     sorted.sort((a, b) => {
         let aVal, bVal;
         
         switch (field) {
             case 'updated':
-                aVal = new Date(a.updatedAt || 0);
-                bVal = new Date(b.updatedAt || 0);
+                aVal = safeParseDate(a?.updatedAt);
+                bVal = safeParseDate(b?.updatedAt);
                 break;
             case 'created':
-                aVal = new Date(a.createdAt || 0);
-                bVal = new Date(b.createdAt || 0);
+                aVal = safeParseDate(a?.createdAt);
+                bVal = safeParseDate(b?.createdAt);
                 break;
             case 'name':
-                aVal = (a.taskName || '').toLowerCase();
-                bVal = (b.taskName || '').toLowerCase();
+                aVal = safeString(a?.taskName);
+                bVal = safeString(b?.taskName);
                 break;
             case 'client':
-                aVal = (a.clientName || '').toLowerCase();
-                bVal = (b.clientName || '').toLowerCase();
+                aVal = safeString(a?.clientName);
+                bVal = safeString(b?.clientName);
                 break;
             case 'state':
-                aVal = a.state || '';
-                bVal = b.state || '';
+                aVal = safeString(a?.state);
+                bVal = safeString(b?.state);
                 break;
             default:
                 return 0;
@@ -718,33 +1079,164 @@ function sortTasks(tasks, sortBy) {
 }
 
 function createTaskCard(task) {
+    // Route demos to dedicated demo card renderer
+    if (isBaseDemoTask(task.taskId)) {
+        return createDemoCard(task);
+    }
+    return createRegularTaskCard(task);
+}
+
+function createDemoCard(task) {
+    const stateClass = task.state.replace(/_/g, '-');
+    const updatedAt = FormattingUtils.formatRelativeTime(task.updatedAt);
+    const slug = extractSlugFromDemoTaskId(task.taskId);
+    
+    // Extract step info from metadata if available, or parse from related tasks
+    // For now, we'll default to step 1 and update via API if needed
+    const currentStep = task.metadata?.demoStep || 1;
+    const totalSteps = 4;
+    const stepNames = ['Branding', 'Copywriting', 'Imagery', 'Review'];
+    const currentStepName = stepNames[currentStep - 1] || 'Processing';
+    
+    // Check if demo is in a completion state
+    const isCompleted = task.state === 'completed' || task.state === 'awaiting_approval';
+    
+    // Generate progress dots - mark all as completed for terminal states
+    const progressDots = [1, 2, 3, 4].map(step => {
+        let dotClass = 'demo-progress-dot';
+        if (isCompleted) {
+            dotClass += ' completed';
+        } else if (step < currentStep) {
+            dotClass += ' completed';
+        } else if (step === currentStep) {
+            dotClass += ' active';
+        }
+        return `<span class="${dotClass}" title="Step ${step}: ${stepNames[step - 1]}"></span>`;
+    }).join('');
+    
+    // Step label - show "Complete!" for terminal states
+    const stepLabel = isCompleted 
+        ? 'Complete!' 
+        : `Step ${currentStep} of ${totalSteps}: ${currentStepName}`;
+    
+    // Check if task has an active agent step
+    const isStaleQueueMessage = task.currentStep && (
+        task.currentStep.toLowerCase().includes('waiting in queue') ||
+        task.currentStep.toLowerCase().includes('queued')
+    );
+    const showStep = task.currentStep && !isStaleQueueMessage && (task.state === 'in_progress' || task.state === 'testing' || task.state === 'pending');
+    const stepHtml = showStep
+        ? `<div class="current-step-text">➜ ${FormattingUtils.escapeHtml(task.currentStep)}</div>`
+        : '';
+
+    return `
+        <div class="task-card demo-card" data-task-id="${task.taskId}" data-slug="${slug}">
+            <div class="task-card-header">
+                <div class="task-card-header-main">
+                    <div class="state-badge-container">
+                        <span class="demo-badge">Demo</span>
+                        <span class="state-badge ${stateClass}">${FormattingUtils.formatState(task.state)}</span>
+                        ${stepHtml}
+                    </div>
+                    <div class="task-card-title" title="${FormattingUtils.escapeHtml(task.taskName || 'Untitled Demo')}">
+                        ${FormattingUtils.escapeHtml(task.taskName || 'Untitled Demo')}
+                    </div>
+                </div>
+                <button class="delete-task-btn" data-task-id="${task.taskId}" data-task-name="${FormattingUtils.escapeHtml(task.taskName || task.taskId)}" title="Delete demo">
+                    <i data-lucide="trash-2"></i>
+                </button>
+            </div>
+            
+            <div class="demo-progress-mini">
+                <div class="demo-progress-info">
+                    <span class="demo-step-label">${stepLabel}</span>
+                </div>
+                <div class="demo-progress-dots">
+                    ${progressDots}
+                </div>
+            </div>
+            
+            <div class="task-card-meta">
+                <div class="meta-item" title="Client Slug">
+                    <i data-lucide="folder"></i>
+                    <span>${FormattingUtils.escapeHtml(slug)}</span>
+                </div>
+                <div class="meta-item" title="Last Updated">
+                    <i data-lucide="clock"></i>
+                    <span>${updatedAt}</span>
+                </div>
+                ${task.clientName ? `
+                <div class="meta-item" title="Business Name">
+                    <i data-lucide="building-2"></i>
+                    <span>${FormattingUtils.escapeHtml(task.clientName)}</span>
+                </div>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function createRegularTaskCard(task) {
     const stateClass = task.state.replace(/_/g, '-');
     const updatedAt = FormattingUtils.formatRelativeTime(task.updatedAt);
     const createdAt = FormattingUtils.formatDateShort(task.createdAt);
     const description = task.description || 'No description provided';
-    // Truncate description if too long (max 200 characters)
-    const truncatedDescription = description.length > 200 
-        ? description.substring(0, 200) + '...' 
+    // Truncate description if too long (max 120 characters for new layout)
+    const truncatedDescription = description.length > 120 
+        ? description.substring(0, 120) + '...' 
         : description;
     
+    
+    // Check if task has an active agent step (filter out stale queue messages)
+    const isStaleQueueMessage = task.currentStep && (
+        task.currentStep.toLowerCase().includes('waiting in queue') ||
+        task.currentStep.toLowerCase().includes('queued') ||
+        task.currentStep.toLowerCase().includes('position in queue')
+    );
+    const showStep = task.currentStep && !isStaleQueueMessage && (task.state === 'in_progress' || task.state === 'testing' || task.state === 'pending' || task.state === 'awaiting_approval');
+    const stepHtml = showStep
+        ? `<div class="current-step-text">➜ ${FormattingUtils.escapeHtml(task.currentStep)}</div>`
+        : '';
+
     return `
         <div class="task-card" data-task-id="${task.taskId}">
             <div class="task-card-header">
-                <div>
-                    <div class="task-card-title">${FormattingUtils.escapeHtml(task.taskName || 'Untitled Task')}</div>
-                    <span class="state-badge ${stateClass}">${FormattingUtils.formatState(task.state)}</span>
+                <div class="task-card-header-main">
+                    <div class="state-badge-container">
+                        <span class="state-badge ${stateClass}">${FormattingUtils.formatState(task.state)}</span>
+                        ${stepHtml}
+                    </div>
+                    <div class="task-card-title" title="${FormattingUtils.escapeHtml(task.taskName || 'Untitled Task')}">
+                        ${FormattingUtils.escapeHtml(task.taskName || 'Untitled Task')}
+                    </div>
                 </div>
-                <button class="delete-task-btn" data-task-id="${task.taskId}" data-task-name="${FormattingUtils.escapeHtml(task.taskName || task.taskId)}" title="Delete task">🗑️</button>
+                <button class="delete-task-btn" data-task-id="${task.taskId}" data-task-name="${FormattingUtils.escapeHtml(task.taskName || task.taskId)}" title="Delete task">
+                    <i data-lucide="trash-2"></i>
+                </button>
             </div>
+            
             <div class="task-card-description">
                 ${FormattingUtils.escapeHtml(truncatedDescription)}
             </div>
+            
             <div class="task-card-meta">
-                <span><strong>ID:</strong> ${FormattingUtils.escapeHtml(task.taskId)}</span>
-                ${task.clientName ? `<span><strong>Client:</strong> ${FormattingUtils.escapeHtml(task.clientName)}</span>` : ''}
-                ${task.branchName ? `<span><strong>Branch:</strong> <code>${FormattingUtils.escapeHtml(task.branchName)}</code></span>` : ''}
-                <span><strong>Updated:</strong> ${updatedAt}</span>
-                <span><strong>Created:</strong> ${createdAt}</span>
+                <div class="meta-item" title="Task ID">
+                    <i data-lucide="hash"></i>
+                    <span>${FormattingUtils.escapeHtml(task.taskId)}</span>
+                </div>
+                <div class="meta-item" title="Last Updated">
+                    <i data-lucide="clock"></i>
+                    <span>${updatedAt}</span>
+                </div>
+                ${task.clientName ? `
+                <div class="meta-item" title="Client">
+                    <i data-lucide="user"></i>
+                    <span>${FormattingUtils.escapeHtml(task.clientName)}</span>
+                </div>` : ''}
+                ${task.branchName ? `
+                <div class="meta-item" title="Git Branch">
+                    <i data-lucide="git-branch"></i>
+                    <code>${FormattingUtils.escapeHtml(task.branchName)}</code>
+                </div>` : ''}
             </div>
         </div>
     `;
@@ -774,8 +1266,10 @@ function renderAllTasksGrouped() {
     
     if (!allTasksList || !allTasksSection || !allTasksEmptyState) return;
     
-    // Filter out completed tasks
-    const incompleteTasks = allTasksGrouped.filter(task => task.state !== 'completed');
+    // Filter out completed tasks AND demo step tasks (keep base demos)
+    const incompleteTasks = allTasksGrouped.filter(task => 
+        task.state !== 'completed' && !isDemoStepTask(task.taskId)
+    );
     
     if (incompleteTasks.length === 0) {
         allTasksList.classList.add('hidden');
@@ -808,7 +1302,9 @@ function renderAllTasksGrouped() {
             <div class="client-group">
                 <div class="client-group-header" data-client="${FormattingUtils.escapeHtml(clientName)}">
                     <div class="client-name">
-                        <span class="client-group-toggle">▼</span>
+                        <span class="client-group-toggle">
+                            <i data-lucide="chevron-down"></i>
+                        </span>
                         <span>${FormattingUtils.escapeHtml(clientName)}</span>
                     </div>
                     <span class="client-task-count">${clientTasks.length} task${clientTasks.length !== 1 ? 's' : ''}</span>
@@ -821,19 +1317,29 @@ function renderAllTasksGrouped() {
     });
     
     allTasksList.innerHTML = html;
+    
+    // Initialize icons for grouped tasks
+    if (window.lucide) lucide.createIcons();
+
     allTasksList.classList.remove('hidden');
     allTasksSection.classList.remove('hidden');
     allTasksEmptyState.classList.add('hidden');
     
-    // Add click handlers for task cards
+    // Add click handlers for task cards (route demos to demo.html)
     document.querySelectorAll('#allTasksList .task-card').forEach(card => {
         card.addEventListener('click', (e) => {
             // Don't navigate if clicking on a button or link
-            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') {
+            if (e.target.closest('button') || e.target.closest('a')) {
                 return;
             }
             const taskId = card.dataset.taskId;
-            window.location.href = `/task.html?taskId=${taskId}`;
+            // Route demos to demo.html, regular tasks to task.html
+            if (isBaseDemoTask(taskId)) {
+                const slug = card.dataset.slug || extractSlugFromDemoTaskId(taskId);
+                window.location.href = `/demo.html?slug=${slug}`;
+            } else {
+                window.location.href = `/task.html?taskId=${taskId}`;
+            }
         });
     });
     
@@ -881,7 +1387,7 @@ function startConnectionPolling() {
 
 async function checkConnection() {
     try {
-        const data = await api.get('/api/health');
+        const data = await api.get('/health');
         updateConnectionStatus(data.clickup?.status || 'disconnected', data.clickup?.user);
     } catch (error) {
         updateConnectionStatus('offline');
@@ -896,6 +1402,10 @@ function updateConnectionStatus(status, user) {
     
     indicator.className = 'status-indicator';
     
+    // Clear any existing connect button
+    const existingBtn = text.querySelector('.connect-link');
+    if (existingBtn) existingBtn.remove();
+    
     switch (status) {
         case 'connected':
             indicator.classList.add('status-online');
@@ -903,11 +1413,11 @@ function updateConnectionStatus(status, user) {
             break;
         case 'expired':
             indicator.classList.add('status-expired');
-            text.textContent = 'ClickUp Token Expired';
+            text.innerHTML = 'ClickUp Token Expired <a href="/auth/clickup" class="connect-link">Reconnect</a>';
             break;
         case 'disconnected':
             indicator.classList.add('status-offline');
-            text.textContent = 'ClickUp Disconnected';
+            text.innerHTML = 'ClickUp Disconnected <a href="/auth/clickup" class="connect-link">Connect</a>';
             break;
         case 'offline':
         default:
@@ -962,25 +1472,34 @@ function renderFailedImports(failures) {
             <div class="failed-import-header">
                 <div class="failed-import-title">${FormattingUtils.escapeHtml(failure.taskName)}</div>
                 <div class="failed-import-meta">
-                    <span>ID: ${FormattingUtils.escapeHtml(failure.taskId)}</span>
-                    <span>${FormattingUtils.formatRelativeTime(failure.timestamp)}</span>
+                    <span title="Task ID"><i data-lucide="hash"></i> ${FormattingUtils.escapeHtml(failure.taskId)}</span>
+                    <span title="Time"><i data-lucide="calendar"></i> ${FormattingUtils.formatRelativeTime(failure.timestamp)}</span>
                 </div>
             </div>
             <div class="failed-import-error">
-                <strong>Error:</strong> ${FormattingUtils.escapeHtml(failure.error)}
+                <i data-lucide="alert-triangle"></i>
+                <span>${FormattingUtils.escapeHtml(failure.error)}</span>
             </div>
             ${failure.suggestions && failure.suggestions.length > 0 ? `
                 <div class="preview-suggestions">
+                    <i data-lucide="lightbulb"></i>
                     <strong>Suggested Clients:</strong> ${failure.suggestions.join(', ')}
                 </div>
             ` : ''}
             <div class="failed-import-actions">
-                <button class="btn btn-sm btn-primary retry-single-btn" data-task-id="${failure.taskId}">Retry</button>
-                ${failure.clickUpUrl ? `<a href="${failure.clickUpUrl}" target="_blank" class="btn btn-sm btn-secondary">View in ClickUp</a>` : ''}
+                <button class="btn btn-sm btn-primary retry-single-btn" data-task-id="${failure.taskId}">
+                    <i data-lucide="refresh-cw"></i> Retry
+                </button>
+                ${failure.clickUpUrl ? `<a href="${failure.clickUpUrl}" target="_blank" class="btn btn-sm btn-secondary">
+                    <i data-lucide="external-link"></i> View in ClickUp
+                </a>` : ''}
             </div>
         </div>
     `).join('');
     
+    // Initialize icons
+    if (window.lucide) lucide.createIcons();
+
     // Add retry handlers
     list.querySelectorAll('.retry-single-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -1001,9 +1520,374 @@ function renderFailedImports(failures) {
             } catch (error) {
                 notifications.error(`Retry failed: ${error.message}`);
                 btn.disabled = false;
-                btn.textContent = 'Retry';
+                btn.innerHTML = '<i data-lucide="refresh-cw"></i> Retry';
+                if (window.lucide) lucide.createIcons();
             }
         });
     });
 }
+
+// --- Webhook Toggle Functionality ---
+
+async function loadWebhookStatus() {
+    try {
+        const status = await api.get('/webhook/status');
+        updateWebhookUI(status.enabled);
+    } catch (error) {
+        console.error('Error loading webhook status:', error);
+        updateWebhookUI(false); // Default to disabled on error
+    }
+}
+
+async function toggleWebhook() {
+    const btn = document.getElementById('webhookToggleBtn');
+    if (!btn) return;
+    
+    // Disable button during toggle
+    btn.disabled = true;
+    
+    try {
+        const result = await api.post('/webhook/toggle');
+        updateWebhookUI(result.enabled);
+        
+        notifications.success(
+            result.enabled 
+                ? '✅ Webhook enabled - ClickUp tasks will now be processed' 
+                : '⏸️ Webhook disabled - ClickUp tasks will be ignored'
+        );
+    } catch (error) {
+        notifications.error(`Failed to toggle webhook: ${error.message}`);
+        // Reload status in case of error
+        await loadWebhookStatus();
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function updateWebhookUI(enabled) {
+    const btn = document.getElementById('webhookToggleBtn');
+    const playIcon = document.getElementById('webhookPlayIcon');
+    const pauseIcon = document.getElementById('webhookPauseIcon');
+    const statusText = document.getElementById('webhookStatusText');
+    const container = document.querySelector('.webhook-status-container');
+    
+    if (!btn || !playIcon || !pauseIcon || !statusText || !container) return;
+    
+    if (enabled) {
+        // Show pause icon, hide play icon
+        playIcon.classList.add('hidden');
+        pauseIcon.classList.remove('hidden');
+        
+        // Update text and styling
+        statusText.textContent = 'Webhook On';
+        btn.classList.add('enabled');
+        btn.classList.remove('disabled');
+        container.classList.add('enabled');
+        btn.title = 'Webhook is enabled - Click to disable';
+    } else {
+        // Show play icon, hide pause icon
+        playIcon.classList.remove('hidden');
+        pauseIcon.classList.add('hidden');
+        
+        // Update text and styling
+        statusText.textContent = 'Webhook Off';
+        btn.classList.add('disabled');
+        btn.classList.remove('enabled');
+        container.classList.remove('enabled');
+        btn.title = 'Webhook is disabled - Click to enable';
+    }
+    
+    // Refresh Lucide icons
+    if (window.lucide) lucide.createIcons();
+}
+
+function startWebhookStatusPolling() {
+    if (webhookPollingInterval) return;
+    
+    // Poll webhook status every 10 seconds
+    webhookPollingInterval = setInterval(async () => {
+        if (document.visibilityState === 'visible') {
+            await loadWebhookStatus();
+        }
+    }, 10000);
+}
+
+// --- Model Selection for Import ---
+
+async function loadAvailableModelsForImport() {
+    const importModelSelect = document.getElementById('importModelSelect');
+    if (!importModelSelect) return;
+    
+    try {
+        const modelsData = await api.get('/models');
+        const availableModels = modelsData.availableModels || ['gpt-4', 'gpt-4-turbo', 'claude-3.5-sonnet'];
+        
+        // Keep the "Use Default" option and add models
+        importModelSelect.innerHTML = '<option value="">Use Default</option>';
+        availableModels.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model;
+            option.textContent = model;
+            importModelSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Failed to load available models:', error);
+        // Use fallback defaults
+        const fallbackModels = ['gpt-4', 'gpt-4-turbo', 'claude-3.5-sonnet', 'claude-3-haiku'];
+        importModelSelect.innerHTML = '<option value="">Use Default</option>';
+        fallbackModels.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model;
+            option.textContent = model;
+            importModelSelect.appendChild(option);
+        });
+    }
+}
+
+// --- Queue Status Functions ---
+
+async function loadQueueStatus() {
+    try {
+        const data = await api.get('/cursor/queue/overview');
+        if (data.success) {
+            lastQueueOverview = data;
+            // Could update a mini status indicator in the header here
+        }
+    } catch (error) {
+        console.error('Error loading queue status:', error);
+    }
+}
+
+async function loadQueueOverview() {
+    try {
+        const data = await api.get('/cursor/queue/overview');
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load queue overview');
+        }
+        
+        lastQueueOverview = data;
+        renderQueueOverview(data);
+    } catch (error) {
+        console.error('Error loading queue overview:', error);
+        notifications.error(`Failed to load queue overview: ${error.message}`);
+    }
+}
+
+function renderQueueOverview(data) {
+    const { queued, running, done, failed, currentStatus, healthCheck } = data;
+    
+    // Update health banner
+    const healthBanner = document.getElementById('queueHealthBanner');
+    const healthIcon = document.getElementById('queueHealthIcon');
+    const healthText = document.getElementById('queueHealthText');
+    const lastActivity = document.getElementById('queueLastActivity');
+    
+    if (healthCheck.isHealthy) {
+        healthBanner.className = 'queue-health-banner healthy';
+        healthIcon.setAttribute('data-lucide', 'check-circle');
+        healthText.textContent = 'Queue is healthy';
+    } else {
+        healthBanner.className = 'queue-health-banner unhealthy';
+        healthIcon.setAttribute('data-lucide', 'alert-triangle');
+        healthText.textContent = 'Queue has issues';
+    }
+    
+    if (healthCheck.lastActivity) {
+        lastActivity.textContent = `Last activity: ${FormattingUtils.formatRelativeTime(healthCheck.lastActivity)}`;
+    } else {
+        lastActivity.textContent = 'No recent activity';
+    }
+    
+    // Update issues section
+    const issuesSection = document.getElementById('queueIssues');
+    const issuesList = document.getElementById('queueIssuesList');
+    
+    if (healthCheck.issues && healthCheck.issues.length > 0) {
+        issuesSection.classList.remove('hidden');
+        issuesList.innerHTML = healthCheck.issues.map(issue => `<li>${FormattingUtils.escapeHtml(issue)}</li>`).join('');
+    } else {
+        issuesSection.classList.add('hidden');
+    }
+    
+    // Update counts
+    document.getElementById('runningCount').textContent = running.length;
+    document.getElementById('queuedCount').textContent = queued.length;
+    document.getElementById('doneCount').textContent = done.length;
+    document.getElementById('failedCount').textContent = failed.length;
+    
+    // Render running tasks
+    const runningTasks = document.getElementById('runningTasks');
+    if (running.length > 0) {
+        runningTasks.innerHTML = running.map(task => `
+            <div class="queue-task-item ${task.isStale ? 'stale' : ''}">
+                <div class="task-id">
+                    <code>${FormattingUtils.escapeHtml(task.taskId)}</code>
+                    ${task.isStale ? '<span class="badge badge-danger">STALE</span>' : '<span class="badge badge-info">Running</span>'}
+                </div>
+                <div class="task-meta">
+                    <span><i data-lucide="folder"></i> ${FormattingUtils.escapeHtml(task.clientFolder?.split(/[/\\]/).pop() || 'unknown')}</span>
+                    <span><i data-lucide="clock"></i> ${formatDuration(task.runTime)}</span>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        runningTasks.innerHTML = '<p class="queue-empty">No tasks running</p>';
+    }
+    
+    // Render queued tasks
+    const queuedTasks = document.getElementById('queuedTasks');
+    if (queued.length > 0) {
+        queuedTasks.innerHTML = queued.map(task => `
+            <div class="queue-task-item">
+                <div class="task-id">
+                    <code>${FormattingUtils.escapeHtml(task.taskId)}</code>
+                </div>
+                <div class="task-meta">
+                    <span><i data-lucide="folder"></i> ${FormattingUtils.escapeHtml(task.clientFolder?.split(/[/\\]/).pop() || 'unknown')}</span>
+                    <span><i data-lucide="clock"></i> Waiting ${formatDuration(task.waitTime)}</span>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        queuedTasks.innerHTML = '<p class="queue-empty">No tasks queued</p>';
+    }
+    
+    // Render done tasks
+    const doneTasks = document.getElementById('doneTasks');
+    if (done.length > 0) {
+        doneTasks.innerHTML = done.map(task => `
+            <div class="queue-task-item">
+                <div class="task-id">
+                    <code>${FormattingUtils.escapeHtml(task.taskId)}</code>
+                </div>
+                <div class="task-meta">
+                    <span><i data-lucide="check-circle"></i> ${FormattingUtils.formatRelativeTime(task.completedAt)}</span>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        doneTasks.innerHTML = '<p class="queue-empty">No recent completions</p>';
+    }
+    
+    // Render failed tasks
+    const failedTasksEl = document.getElementById('failedTasks');
+    if (failed.length > 0) {
+        failedTasksEl.innerHTML = failed.map(task => `
+            <div class="queue-task-item">
+                <div class="task-id">
+                    <code>${FormattingUtils.escapeHtml(task.taskId)}</code>
+                </div>
+                <div class="task-meta">
+                    <span><i data-lucide="x-circle"></i> ${FormattingUtils.formatRelativeTime(task.failedAt)}</span>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        failedTasksEl.innerHTML = '<p class="queue-empty">No recent failures</p>';
+    }
+    
+    // Render current status
+    const currentStatusSection = document.getElementById('currentStatusSection');
+    const currentStatusDetails = document.getElementById('currentStatusDetails');
+    
+    if (currentStatus && currentStatus.task) {
+        currentStatusSection.classList.remove('hidden');
+        currentStatusDetails.innerHTML = `
+            <div class="status-row">
+                <span class="status-label">Task ID</span>
+                <span class="status-value"><code>${FormattingUtils.escapeHtml(currentStatus.task.taskId)}</code></span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">State</span>
+                <span class="status-value ${currentStatus.state}">${FormattingUtils.escapeHtml(currentStatus.state)}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Progress</span>
+                <span class="status-value">${currentStatus.percent}%</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Step</span>
+                <span class="status-value">${FormattingUtils.escapeHtml(currentStatus.step || 'Unknown')}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Last Update</span>
+                <span class="status-value">${FormattingUtils.formatRelativeTime(currentStatus.lastUpdate)}</span>
+            </div>
+        `;
+    } else {
+        currentStatusSection.classList.add('hidden');
+    }
+    
+    // Refresh icons
+    if (window.lucide) lucide.createIcons();
+}
+
+/**
+ * Formats a duration in milliseconds to a human-readable string.
+ * Handles edge cases: negative values, NaN, and extremely large values.
+ * @param {number} ms - Duration in milliseconds
+ * @returns {string} Human-readable duration string
+ */
+function formatDuration(ms) {
+    // Handle invalid input: NaN, null, undefined
+    if (ms == null || isNaN(ms)) {
+        return 'unknown';
+    }
+    
+    // Handle negative durations (clock skew, future start times)
+    if (ms < 0) {
+        return 'just now';
+    }
+    
+    if (ms < 1000) return 'just now';
+    
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+    
+    const hours = Math.floor(minutes / 60);
+    
+    // Cap display at 99 hours to prevent extremely long strings
+    if (hours > 99) {
+        return '99h+';
+    }
+    
+    return `${hours}h ${minutes % 60}m`;
+}
+
+function startQueuePolling() {
+    if (queuePollingInterval) return;
+    
+    // Poll queue status every 10 seconds
+    queuePollingInterval = setInterval(async () => {
+        if (document.visibilityState === 'visible') {
+            await loadQueueStatus();
+        }
+    }, 10000);
+}
+
+function stopQueuePolling() {
+    if (queuePollingInterval) {
+        clearInterval(queuePollingInterval);
+        queuePollingInterval = null;
+    }
+}
+
+// Cleanup webhook and queue polling on page unload
+const originalBeforeUnload = window.onbeforeunload;
+window.addEventListener('beforeunload', () => {
+    if (webhookPollingInterval) {
+        clearInterval(webhookPollingInterval);
+        webhookPollingInterval = null;
+    }
+    if (queuePollingInterval) {
+        clearInterval(queuePollingInterval);
+        queuePollingInterval = null;
+    }
+    if (originalBeforeUnload) {
+        originalBeforeUnload();
+    }
+});
 

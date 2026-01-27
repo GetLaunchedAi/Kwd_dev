@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Demo Website - KWD Dev</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+                <div id="connectionStatus" class="connection-status">
+                    <span class="status-indicator status-offline" id="statusIndicator"></span>
+                    <span id="statusText">Offline</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item active">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-title">
+                    <h1>Create Demo Website</h1>
+                </div>
+                <div class="header-actions">
+                    <button type="button" id="editPromptsBtn" class="btn btn-secondary btn-sm">
+                        <i data-lucide="file-text"></i>
+                        <span>Edit System Prompts</span>
+                    </button>
+                    <button type="button" id="fillSampleBtn" class="btn btn-secondary btn-sm">
+                        <i data-lucide="sparkles"></i>
+                        <span>Fill Sample Data</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div class="form-container card">
+                    <form id="createDemoForm" enctype="multipart/form-data">
+                        <div class="form-section">
+                            <div class="section-title">
+                                <i data-lucide="info"></i>
+                                <h3>Business Information</h3>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="businessName">Business Name *</label>
+                                    <div class="input-wrapper">
+                                        <i data-lucide="briefcase"></i>
+                                        <input type="text" id="businessName" name="businessName" required placeholder="e.g. Sunny Plumbing">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="clientSlug">Client Slug *</label>
+                                    <div class="input-wrapper">
+                                        <i data-lucide="link"></i>
+                                        <input type="text" id="clientSlug" name="clientSlug" required placeholder="e.g. sunny-plumbing">
+                                    </div>
+                                    <div id="slugFeedback" class="text-hint">This will be the folder name and URL component.</div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="email">Contact Email</label>
+                                    <div class="input-wrapper">
+                                        <i data-lucide="mail"></i>
+                                        <input type="email" id="email" name="email" placeholder="contact@example.com">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="phone">Contact Phone</label>
+                                    <div class="input-wrapper">
+                                        <i data-lucide="phone"></i>
+                                        <input type="tel" id="phone" name="phone" placeholder="(555) 123-4567">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="address">Business Address</label>
+                                <div class="input-wrapper">
+                                    <i data-lucide="map-pin"></i>
+                                    <input type="text" id="address" name="address" placeholder="123 Main St, City, State ZIP">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="services">Services / Business Description</label>
+                                <div class="input-wrapper">
+                                    <i data-lucide="list"></i>
+                                    <textarea id="services" name="services" rows="4" placeholder="Describe the services your business offers (e.g., 'Full-service plumbing, drain cleaning, water heater installation')"></textarea>
+                                </div>
+                                <small class="text-hint">Describe the key services or products offered by the business.</small>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="section-title">
+                                <i data-lucide="palette"></i>
+                                <h3>Branding & Style</h3>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="primaryColor">Primary Color *</label>
+                                    <div class="color-input-wrapper">
+                                        <input type="color" id="primaryColor" name="primaryColor" value="#3b82f6">
+                                        <div class="hex-input-group">
+                                            <span class="hex-hash">#</span>
+                                            <input type="text" id="primaryColorHex" value="3b82f6" class="hex-input">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="secondaryColor">Secondary Color</label>
+                                    <div class="color-input-wrapper">
+                                        <input type="color" id="secondaryColor" name="secondaryColor" value="#1d4ed8">
+                                        <div class="hex-input-group">
+                                            <span class="hex-hash">#</span>
+                                            <input type="text" id="secondaryColorHex" value="1d4ed8" class="hex-input">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="fontFamily">Font Family</label>
+                                    <div class="input-wrapper">
+                                        <i data-lucide="type"></i>
+                                        <select id="fontFamily" name="fontFamily">
+                                            <option value="Inter, sans-serif">Inter (Modern Sans)</option>
+                                            <option value="'Montserrat', sans-serif">Montserrat (Geometric Sans)</option>
+                                            <option value="'Playfair Display', serif">Playfair Display (Elegant Serif)</option>
+                                            <option value="'Roboto', sans-serif">Roboto (Clean Sans)</option>
+                                            <option value="system-ui, sans-serif">System Default</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="templateId">Template Basis *</label>
+                                    <div class="input-wrapper">
+                                        <i data-lucide="layout"></i>
+                                        <select id="templateId" name="templateId">
+                                            <option value="modern">Modern Business (Eleventy)</option>
+                                            <option value="trade">Service/Trade (Eleventy)</option>
+                                            <option value="">-- Custom GitHub Repository --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group hidden" id="customRepoContainer">
+                                <label for="githubRepoUrl">GitHub Repository URL *</label>
+                                <div class="input-group">
+                                    <div class="input-wrapper flex-grow">
+                                        <i data-lucide="github"></i>
+                                        <input type="url" id="githubRepoUrl" name="githubRepoUrl" placeholder="https://github.com/username/repository">
+                                    </div>
+                                    <button type="button" id="testRepoBtn" class="btn btn-secondary">
+                                        <i data-lucide="search"></i>
+                                        <span>Test URL</span>
+                                    </button>
+                                </div>
+                                <div id="repoTestResult" class="repo-test-result hidden"></div>
+                                <small class="text-hint">Ensure the repository is <strong>public</strong> and uses a standard structure.</small>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="section-title">
+                                <i data-lucide="cpu"></i>
+                                <h3>AI Model</h3>
+                            </div>
+                            <div class="form-group">
+                                <label for="aiModel">AI Model</label>
+                                <div class="input-wrapper">
+                                    <i data-lucide="bot"></i>
+                                    <select id="aiModel" name="aiModel">
+                                        <!-- Populated dynamically -->
+                                    </select>
+                                </div>
+                                <small class="text-hint">Select the AI model to use for generating this demo site.</small>
+                            </div>
+                            
+                            <div class="advanced-toggle">
+                                <button type="button" id="toggleAdvancedModels" class="btn btn-ghost btn-sm">
+                                    <i data-lucide="chevron-down" id="advancedIcon"></i>
+                                    <span>Advanced: Per-Step Model Selection</span>
+                                </button>
+                            </div>
+                            
+                            <div id="advancedModelsSection" class="advanced-section hidden">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label for="step1Model">Step 1 - Branding</label>
+                                        <div class="input-wrapper">
+                                            <i data-lucide="palette"></i>
+                                            <select id="step1Model" name="step1Model">
+                                                <option value="">Use Default</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="step2Model">Step 2 - Copywriting</label>
+                                        <div class="input-wrapper">
+                                            <i data-lucide="pen-tool"></i>
+                                            <select id="step2Model" name="step2Model">
+                                                <option value="">Use Default</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="step3Model">Step 3 - Imagery</label>
+                                        <div class="input-wrapper">
+                                            <i data-lucide="image"></i>
+                                            <select id="step3Model" name="step3Model">
+                                                <option value="">Use Default</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="step4Model">Step 4 - Review</label>
+                                        <div class="input-wrapper">
+                                            <i data-lucide="check-circle"></i>
+                                            <select id="step4Model" name="step4Model">
+                                                <option value="">Use Default</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="section-title">
+                                <i data-lucide="image"></i>
+                                <h3>Brand Assets</h3>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="logo">Logo Image</label>
+                                    <div class="file-drop-zone" id="logoDropZone">
+                                        <i data-lucide="upload-cloud"></i>
+                                        <span>Click or drag logo here</span>
+                                        <input type="file" id="logo" name="logo" accept="image/png,image/jpeg,image/svg+xml" class="hidden-file-input">
+                                        <div class="file-preview hidden" id="logoPreview"></div>
+                                    </div>
+                                    <small class="text-hint">Recommended: Transparent PNG or SVG.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="heroImage">Hero Image</label>
+                                    <div class="file-drop-zone" id="heroDropZone">
+                                        <i data-lucide="image"></i>
+                                        <span>Click or drag hero image here</span>
+                                        <input type="file" id="heroImage" name="heroImage" accept="image/png,image/jpeg" class="hidden-file-input">
+                                        <div class="file-preview hidden" id="heroImagePreview"></div>
+                                    </div>
+                                    <small class="text-hint">Recommended: High resolution landscape JPG/PNG.</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" id="submitBtn" class="btn btn-primary btn-lg btn-glow">
+                                <i data-lucide="zap"></i>
+                                <span>Generate Demo Website</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Progress Section (Initially Hidden) -->
+                <div id="progressContainer" class="progress-card card hidden">
+                    <div class="progress-header-unified">
+                        <div class="progress-title-row">
+                            <h2 id="progressTitle">Creating your demo</h2>
+                            <div id="statusBadge" class="badge badge-info">Initializing</div>
+                        </div>
+                        <p id="progressSubtitle" class="progress-subtitle">This usually takes about 30-60 seconds</p>
+                    </div>
+                    
+                    <div class="progress-visual">
+                        <!-- Unified Progress Bar -->
+                        <div class="unified-progress">
+                            <div class="unified-progress-bar">
+                                <div id="unifiedProgressFill" class="unified-progress-fill" style="width: 0%;"></div>
+                            </div>
+                            <div class="unified-progress-label">
+                                <span id="currentPhaseLabel">Setting up...</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                        </div>
+
+                        <!-- Combined Stage Indicators -->
+                        <div class="stage-indicators">
+                            <div class="stage-group setup-stages">
+                                <div class="stage-group-label">Setup</div>
+                                <div class="stage-dots">
+                                    <div class="stage-dot" id="stage-cloning" title="Cloning Template">
+                                        <i data-lucide="copy"></i>
+                                    </div>
+                                    <div class="stage-dot" id="stage-installing" title="Installing Dependencies">
+                                        <i data-lucide="package"></i>
+                                    </div>
+                                    <div class="stage-dot" id="stage-organizing" title="Organizing Assets">
+                                        <i data-lucide="folder-tree"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stage-connector"></div>
+                            <div class="stage-group ai-stages">
+                                <div class="stage-group-label">AI Customization</div>
+                                <div class="stage-dots">
+                                    <div class="stage-dot" id="stage-prompting" title="Preparing AI">
+                                        <i data-lucide="message-square"></i>
+                                    </div>
+                                    <div class="stage-dot" id="stage-triggering" title="Initializing Agent">
+                                        <i data-lucide="cpu"></i>
+                                    </div>
+                                    <div class="stage-dot" id="stage-running" title="Building Site">
+                                        <i data-lucide="sparkles"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- AI Agent Sub-steps (shown during running phase) -->
+                        <div id="agentWorkflowContainer" class="agent-substeps hidden">
+                            <div class="substeps-header">
+                                <i data-lucide="bot"></i>
+                                <span id="agentStatusText">AI Agent Progress</span>
+                            </div>
+                            <div class="substeps-row">
+                                <div class="substep" id="agent-step-1">
+                                    <div class="substep-marker"></div>
+                                    <span>Branding</span>
+                                </div>
+                                <div class="substep" id="agent-step-2">
+                                    <div class="substep-marker"></div>
+                                    <span>Copy</span>
+                                </div>
+                                <div class="substep" id="agent-step-3">
+                                    <div class="substep-marker"></div>
+                                    <span>Imagery</span>
+                                </div>
+                                <div class="substep" id="agent-step-4">
+                                    <div class="substep-marker"></div>
+                                    <span>Review</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Status Header (shown during progress) -->
+                    <div id="liveStatusHeader" class="hidden" style="margin-bottom: 16px;"></div>
+
+                    <!-- Approval Section (shown when demo is awaiting approval) -->
+                    <div id="demoApprovalSection" class="final-approval-panel hidden">
+                        <div class="final-approval-header">
+                            <div class="final-approval-icon">
+                                <i data-lucide="sparkles"></i>
+                            </div>
+                            <div class="final-approval-text">
+                                <h3>🎉 Demo Ready for Review!</h3>
+                                <p>The AI has finished customizing your website. Preview it and choose your next action.</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Preview link -->
+                        <div style="margin-bottom: 24px;">
+                            <a id="approvalPreviewLink" href="#" target="_blank" class="btn btn-primary btn-lg w-full">
+                                <i data-lucide="external-link"></i>
+                                <span>Open Preview in New Tab</span>
+                            </a>
+                        </div>
+
+                        <!-- 3-Way Approval Actions -->
+                        <div class="final-approval-actions">
+                            <div class="approval-action-card primary" id="approvePublishCard">
+                                <div class="action-icon">
+                                    <i data-lucide="rocket"></i>
+                                </div>
+                                <div class="action-title">Approve & Publish</div>
+                                <div class="action-desc">Create GitHub repo and publish the site</div>
+                            </div>
+                            <div class="approval-action-card secondary" id="requestChangesCard">
+                                <div class="action-icon">
+                                    <i data-lucide="edit-3"></i>
+                                </div>
+                                <div class="action-title">Request Changes</div>
+                                <div class="action-desc">Send feedback and re-run AI agent</div>
+                            </div>
+                            <div class="approval-action-card danger" id="rejectDemoCard">
+                                <div class="action-icon">
+                                    <i data-lucide="trash-2"></i>
+                                </div>
+                                <div class="action-title">Reject Demo</div>
+                                <div class="action-desc">Delete this demo completely</div>
+                            </div>
+                        </div>
+                        
+                        <p class="approval-hint" style="margin-top: 20px;">
+                            <i data-lucide="info"></i>
+                            <span><strong>Approve & Publish</strong> creates a GitHub repo. <strong>Request Changes</strong> lets you provide feedback. <strong>Reject</strong> deletes the demo.</span>
+                        </p>
+                    </div>
+
+                    <!-- Request Changes Modal -->
+                    <div id="requestChangesModal" class="modal-overlay hidden">
+                        <div class="modal">
+                            <div class="modal-header">
+                                <h3 class="modal-title">Request Changes</h3>
+                                <button class="modal-close" id="closeChangesModal">&times;</button>
+                            </div>
+                            <div class="modal-body feedback-modal-content">
+                                <h4>What would you like changed?</h4>
+                                <textarea 
+                                    id="demoFeedbackInput" 
+                                    class="feedback-textarea modal-input" 
+                                    placeholder="Describe what you'd like different (e.g., 'Make the hero section larger', 'Use a different shade of blue', 'Change the headline to be more action-oriented')..."
+                                    rows="5"
+                                ></textarea>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn btn-secondary" id="cancelChangesBtn">Cancel</button>
+                                <button class="btn btn-warning" id="submitChangesBtn" disabled>
+                                    <i data-lucide="send"></i>
+                                    <span>Send Feedback & Retry</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Reject Demo Confirmation Modal -->
+                    <div id="rejectDemoModal" class="modal-overlay hidden">
+                        <div class="modal">
+                            <div class="modal-header">
+                                <h3 class="modal-title">Reject Demo</h3>
+                                <button class="modal-close" id="closeRejectModal">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <p>Are you sure you want to reject and delete this demo?</p>
+                                <p class="text-hint" style="color: var(--color-danger);">
+                                    This will permanently delete all demo files. This action cannot be undone.
+                                </p>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn btn-secondary" id="cancelRejectBtn">Cancel</button>
+                                <button class="btn btn-danger" id="confirmRejectBtn">
+                                    <i data-lucide="trash-2"></i>
+                                    <span>Yes, Delete Demo</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="pushWarning" class="alert alert-warning hidden mb-4 mx-8">
+                        <div class="alert-icon">
+                            <i data-lucide="alert-triangle"></i>
+                        </div>
+                        <div class="alert-content">
+                            <strong>Warning:</strong> <span id="pushWarningMessage">Local changes were committed, but could not be pushed to a remote repository because Git is not configured on this machine.</span>
+                        </div>
+                    </div>
+
+                    <div class="progress-log-container">
+                        <div class="log-header">
+                            <i data-lucide="terminal"></i>
+                            <span>Process Logs</span>
+                        </div>
+                        <div class="progress-message" id="progressMessage">
+                            <div class="log-entry">Preparing to build your modern business website...</div>
+                        </div>
+                    </div>
+
+                    <div id="successActions" class="success-actions-container hidden">
+                        <div class="success-banner">
+                            <div class="success-icon">
+                                <i data-lucide="check-circle"></i>
+                            </div>
+                            <div class="success-text">
+                                <h3>Website Ready for Customization!</h3>
+                                <p>Your demo has been created and the AI agent is now working on it.</p>
+                            </div>
+                        </div>
+                        <div class="success-buttons">
+                            <button id="viewDemoBtn" class="btn btn-primary btn-lg">
+                                <i data-lucide="layout"></i>
+                                <span>Go to Client Dashboard</span>
+                            </button>
+                            <a href="/index.html" class="btn btn-secondary btn-lg">Back to Dashboard</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- System Prompts Editor Modal -->
+    <div id="systemPromptsModal" class="modal-overlay hidden">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i data-lucide="file-text"></i>
+                    Edit System Prompts
+                </h3>
+                <button class="modal-close" id="closePromptsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="prompts-nav">
+                    <div class="prompt-tabs">
+                        <button class="prompt-tab active" data-step="1">
+                            <i data-lucide="palette"></i>
+                            <span>Step 1: Branding</span>
+                        </button>
+                        <button class="prompt-tab" data-step="2">
+                            <i data-lucide="pen-tool"></i>
+                            <span>Step 2: Copywriting</span>
+                        </button>
+                        <button class="prompt-tab" data-step="3">
+                            <i data-lucide="image"></i>
+                            <span>Step 3: Imagery</span>
+                        </button>
+                        <button class="prompt-tab" data-step="4">
+                            <i data-lucide="check-circle"></i>
+                            <span>Step 4: Review</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="prompt-editor">
+                    <div class="prompt-header">
+                        <h4 id="currentPromptTitle">Step 1: Branding & Identity</h4>
+                        <div class="prompt-actions">
+                            <button id="resetPromptBtn" class="btn btn-sm btn-secondary">
+                                <i data-lucide="rotate-ccw"></i>
+                                <span>Reset to Original</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="prompt-editor-info">
+                        <p class="text-hint">
+                            <i data-lucide="info" style="width: 14px; height: 14px; display: inline;"></i>
+                            Available placeholders: <code>{{taskId}}</code>, <code>{{businessName}}</code>, <code>{{clientSlug}}</code>, <code>{{primaryColor}}</code>, <code>{{secondaryColor}}</code>, <code>{{fontFamily}}</code>, <code>{{email}}</code>, <code>{{phone}}</code>, <code>{{address}}</code>, <code>{{services}}</code>, <code>{{imagesDir}}</code>, <code>{{imageRetrieverPath}}</code>, <code>{{workflowHistory}}</code>
+                        </p>
+                    </div>
+                    <textarea id="promptEditor" class="prompt-textarea" placeholder="Loading prompt..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="modal-footer-left">
+                    <span id="promptSaveStatus" class="text-hint"></span>
+                </div>
+                <div class="modal-footer-right">
+                    <button class="btn btn-secondary" id="cancelPromptsBtn">Cancel</button>
+                    <button class="btn btn-primary" id="savePromptsBtn">
+                        <i data-lucide="save"></i>
+                        <span>Save Changes</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* System Prompts Modal Styles */
+        .modal-lg {
+            max-width: 95vw;
+            width: 1200px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-lg .modal-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+        }
+        .prompts-nav {
+            padding: 16px 24px 0;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-bg-secondary);
+        }
+        .prompt-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: -1px;
+        }
+        .prompt-tab {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            border: none;
+            background: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-weight: 500;
+            color: var(--color-text-secondary);
+            transition: all 0.2s;
+            border-radius: 8px 8px 0 0;
+        }
+        .prompt-tab:hover {
+            color: var(--color-text);
+            background: var(--color-bg-tertiary);
+        }
+        .prompt-tab.active {
+            color: var(--color-primary);
+            border-bottom-color: var(--color-primary);
+            background: var(--color-bg);
+        }
+        .prompt-tab i {
+            width: 16px;
+            height: 16px;
+        }
+        .prompt-editor {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            padding: 16px 24px;
+            overflow: hidden;
+        }
+        .prompt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .prompt-header h4 {
+            margin: 0;
+            font-size: 1.1rem;
+        }
+        .prompt-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .prompt-editor-info {
+            margin-bottom: 12px;
+        }
+        .prompt-editor-info code {
+            background: var(--color-bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--color-primary);
+        }
+        .prompt-textarea {
+            width: 100%;
+            flex: 1;
+            min-height: 400px;
+            padding: 16px;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            resize: none;
+            background: var(--color-bg);
+            color: var(--color-text);
+        }
+        .prompt-textarea:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .modal-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            border-top: 1px solid var(--color-border);
+        }
+        .modal-footer-left {
+            flex: 1;
+        }
+        .modal-footer-right {
+            display: flex;
+            gap: 12px;
+        }
+        #promptSaveStatus {
+            font-size: 0.9rem;
+        }
+        .modal-header .modal-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-header .modal-title i {
+            width: 20px;
+            height: 20px;
+            color: var(--color-primary);
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .modal-lg {
+                max-width: 100vw;
+                width: 100%;
+                height: 100vh;
+                max-height: 100vh;
+                border-radius: 0;
+            }
+            .prompt-tabs {
+                flex-wrap: wrap;
+            }
+            .prompt-tab span {
+                display: none;
+            }
+            .prompt-tab {
+                padding: 12px;
+            }
+        }
+    </style>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="utils/formatting.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="utils/live-status.js"></script>
+    <script src="create-demo.js"></script>
+</body>
+</html>
+

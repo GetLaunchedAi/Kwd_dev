@@ -23,13 +23,27 @@ export interface ChangeSummary {
  */
 export async function generateChangeSummary(
   folderPath: string,
-  branchName: string
+  branchName: string,
+  baseRevision?: string
 ): Promise<ChangeSummary> {
-  logger.info(`Generating change summary for branch: ${branchName}`);
+  logger.info(`Generating change summary for branch: ${branchName}${baseRevision ? ` (base: ${baseRevision})` : ''}`);
 
-  // Get diff between default branch and feature branch
-  const defaultBranch = config.git.defaultBranch;
-  const fullDiff = await getDiff(folderPath, defaultBranch, branchName);
+  // Get diff between base revision (or default branch) and current working tree (live)
+  const base = baseRevision || config.git.defaultBranch;
+  let fullDiff = '';
+  
+  try {
+    fullDiff = await getDiff(folderPath, base);
+  } catch (error: any) {
+    logger.warn(`Could not get diff against ${base}: ${error.message}. Falling back to HEAD.`);
+    try {
+      // Fallback to diffing against current HEAD (shows working tree changes if any)
+      fullDiff = await getDiff(folderPath, 'HEAD');
+    } catch (fallbackError: any) {
+      logger.error(`Fallback diff failed: ${fallbackError.message}`);
+      fullDiff = ''; // Return empty diff rather than crashing
+    }
+  }
   
   // Get git status to see file changes
   const status = await getStatus(folderPath);
@@ -37,11 +51,12 @@ export async function generateChangeSummary(
   // Parse diff to extract statistics
   const diffStats = parseDiffStats(fullDiff);
   
-  // Generate preview (first 100 lines or key sections)
-  const diffPreview = generateDiffPreview(fullDiff, 100);
-
   // Build file list from status
   const fileList = buildFileList(status, diffStats);
+
+  // Filter fullDiff to exclude internal files
+  const filteredDiff = filterDiff(fullDiff);
+  const diffPreview = generateDiffPreview(filteredDiff, 100);
 
   return {
     filesModified: diffStats.filesModified,
@@ -51,8 +66,36 @@ export async function generateChangeSummary(
     linesRemoved: diffStats.linesRemoved,
     fileList,
     diffPreview,
-    fullDiff,
+    fullDiff: filteredDiff,
   };
+}
+
+/**
+ * Filters a git diff string to remove internal system files
+ */
+function filterDiff(diff: string): string {
+  const isInternalFile = (filePath: string) => {
+    return filePath.startsWith('.clickup-workflow/') || 
+           filePath.startsWith('.cursor/') || 
+           filePath.startsWith('logs/');
+  };
+
+  const sections = diff.split('diff --git ');
+  if (sections.length <= 1) return diff;
+
+  const header = sections[0]; // Usually empty or some git headers
+  const filteredSections = sections.slice(1).filter(section => {
+    const match = section.match(/^a\/(.+?) b\/(.+?)\n/);
+    if (match) {
+      const filePath = match[2];
+      return !isInternalFile(filePath);
+    }
+    return true;
+  });
+
+  if (filteredSections.length === 0) return header;
+  
+  return header + filteredSections.map(s => 'diff --git ' + s).join('');
 }
 
 /**
@@ -75,19 +118,29 @@ function parseDiffStats(diff: string): {
   let linesAdded = 0;
   let linesRemoved = 0;
 
+  const isInternalFile = (filePath: string) => {
+    return filePath.startsWith('.clickup-workflow/') || 
+           filePath.startsWith('.cursor/') || 
+           filePath.startsWith('logs/');
+  };
+
   for (const line of lines) {
     // Detect file header
     if (line.startsWith('diff --git')) {
       const match = line.match(/diff --git a\/(.+?) b\/(.+?)$/);
       if (match) {
         currentFile = match[2];
+        if (isInternalFile(currentFile)) {
+          currentFile = null;
+          continue;
+        }
         fileStats.set(currentFile, { additions: 0, deletions: 0 });
         filesModified++;
       }
     } else if (line.startsWith('new file mode')) {
-      filesAdded++;
+      if (currentFile) filesAdded++;
     } else if (line.startsWith('deleted file mode')) {
-      filesDeleted++;
+      if (currentFile) filesDeleted++;
     } else if (line.startsWith('+++') || line.startsWith('---')) {
       // File header
       continue;
@@ -96,14 +149,14 @@ function parseDiffStats(diff: string): {
       continue;
     } else if (line.startsWith('+') && !line.startsWith('+++')) {
       // Added line
-      linesAdded++;
       if (currentFile && fileStats.has(currentFile)) {
+        linesAdded++;
         fileStats.get(currentFile)!.additions++;
       }
     } else if (line.startsWith('-') && !line.startsWith('---')) {
       // Removed line
-      linesRemoved++;
       if (currentFile && fileStats.has(currentFile)) {
+        linesRemoved++;
         fileStats.get(currentFile)!.deletions++;
       }
     }
@@ -156,7 +209,7 @@ function generateDiffPreview(diff: string, maxLines: number): string {
 }
 
 /**
- * Builds file list with statistics
+ * Builds file list with statistics, filtering out internal system files
  */
 function buildFileList(
   status: any,
@@ -164,8 +217,15 @@ function buildFileList(
 ): Array<{ path: string; status: string; additions?: number; deletions?: number }> {
   const fileList: Array<{ path: string; status: string; additions?: number; deletions?: number }> = [];
 
+  const isInternalFile = (filePath: string) => {
+    return filePath.startsWith('.clickup-workflow/') || 
+           filePath.startsWith('.cursor/') || 
+           filePath.startsWith('logs/');
+  };
+
   // Add modified files
   for (const file of status.modified || []) {
+    if (isInternalFile(file)) continue;
     const stats = diffStats.fileStats.get(file) || { additions: 0, deletions: 0 };
     fileList.push({
       path: file,
@@ -177,6 +237,7 @@ function buildFileList(
 
   // Add created files
   for (const file of status.created || []) {
+    if (isInternalFile(file)) continue;
     const stats = diffStats.fileStats.get(file) || { additions: 0, deletions: 0 };
     fileList.push({
       path: file,
@@ -188,6 +249,7 @@ function buildFileList(
 
   // Add deleted files
   for (const file of status.deleted || []) {
+    if (isInternalFile(file)) continue;
     fileList.push({
       path: file,
       status: 'deleted',

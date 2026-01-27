@@ -1,0 +1,32 @@
+{
+  "state": "completed",
+  "metadata": {
+    "initialScreenshots": [
+      "/screenshots/86b8233f8/before_full.png"
+    ],
+    "approvalToken": "a12d996e33fec5bd6e2267c58328aa532f55d5e90504a5fe915915cb64346db0",
+    "testResult": {
+      "success": true,
+      "exitCode": 0,
+      "output": "Health Check Results:\n- Broken Links: 0\n- Console Errors: 0 (0 critical)",
+      "testCommand": "visual-health-check",
+      "duration": 4021,
+      "screenshots": [
+        "/screenshots/86b8233f8/after_full.png"
+      ],
+      "brokenLinks": [],
+      "consoleErrors": []
+    },
+    "approvalNotificationFailed": true,
+    "approvalError": "getaddrinfo ENOTFOUND smtp.example.com"
+  },
+  "taskId": "86b8233f8",
+  "clientFolder": "D:\\Users\\socce\\Desktop\\KWD Dev\\Kwd_dev\\client-websites\\jacks-roofing-llc",
+  "branchName": "main",
+  "createdAt": "2026-01-06T23:39:05.316Z",
+  "updatedAt": "2026-01-06T23:40:34.739Z",
+  "currentStep": "Workflow completed",
+  "agentCompletion": {
+    "completionDetectedAt": "2026-01-06T23:39:56.640Z"
+  }
+}

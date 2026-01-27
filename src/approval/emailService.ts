@@ -5,6 +5,91 @@ import { ApprovalRequest, getApprovalUrl, getRejectionUrl } from './approvalMana
 import { ChangeSummary } from './changeSummarizer';
 import { TestResult } from '../testing/testRunner';
 
+// ISSUE 7 FIX: Common placeholder values that indicate SMTP is not configured
+const PLACEHOLDER_HOSTS = [
+  'smtp.example.com',
+  'example.com',
+  'mail.example.com',
+  'localhost',
+  '127.0.0.1',
+  'your-smtp-host',
+  'smtp.your-domain.com',
+  ''
+];
+
+const PLACEHOLDER_AUTH_VALUES = [
+  'user@example.com',
+  'noreply@example.com',
+  'test@example.com',
+  'your-password',
+  'password',
+  'changeme',
+  ''
+];
+
+interface SmtpConfigStatus {
+  configured: boolean;
+  reason?: string;
+}
+
+/**
+ * Checks if SMTP is properly configured with real values (not placeholders)
+ * ISSUE 7 FIX: Consolidated validation to prevent DNS errors from placeholder domains
+ */
+export function isSmtpConfigured(): boolean {
+  return getSmtpConfigStatus().configured;
+}
+
+/**
+ * Gets detailed SMTP configuration status with reason
+ */
+function getSmtpConfigStatus(): SmtpConfigStatus {
+  const emailConfig = config.approval?.email;
+  
+  if (!emailConfig) {
+    return { configured: false, reason: 'Email configuration not found in config' };
+  }
+  
+  if (!emailConfig.smtp) {
+    return { configured: false, reason: 'SMTP configuration not found' };
+  }
+  
+  const { host, auth } = emailConfig.smtp;
+  
+  // Check for placeholder host
+  if (!host) {
+    return { configured: false, reason: 'SMTP host is empty' };
+  }
+  
+  if (PLACEHOLDER_HOSTS.some(p => host.toLowerCase() === p.toLowerCase())) {
+    return { configured: false, reason: `SMTP host "${host}" appears to be a placeholder. Please configure a real SMTP server.` };
+  }
+  
+  // Check for placeholder auth values
+  if (!auth || !auth.user) {
+    return { configured: false, reason: 'SMTP user is not configured' };
+  }
+  
+  if (PLACEHOLDER_AUTH_VALUES.some(p => auth.user.toLowerCase() === p.toLowerCase())) {
+    return { configured: false, reason: `SMTP user "${auth.user}" appears to be a placeholder` };
+  }
+  
+  if (!auth.pass) {
+    return { configured: false, reason: 'SMTP password is not configured' };
+  }
+  
+  if (PLACEHOLDER_AUTH_VALUES.some(p => auth.pass.toLowerCase() === p.toLowerCase())) {
+    return { configured: false, reason: 'SMTP password appears to be a placeholder' };
+  }
+  
+  // Check if auth values contain 'example' which suggests placeholder
+  if (auth.user.includes('example') || auth.pass.includes('example')) {
+    return { configured: false, reason: 'SMTP credentials contain "example" suggesting placeholder values' };
+  }
+  
+  return { configured: true };
+}
+
 /**
  * Sends failure email
  */
@@ -14,6 +99,11 @@ export async function sendFailureEmail(
   toEmailOverride?: string
 ): Promise<void> {
   if (config.approval.method !== 'email') {
+    return;
+  }
+  
+  if (!isSmtpConfigured()) {
+    logger.debug(`Skipping failure email for task ${taskId} - SMTP not configured. Configure SMTP settings in config/config.json or set enableEmailNotifications to false.`);
     return;
   }
 
@@ -70,7 +160,12 @@ Test Output:
 ${testResult.output.substring(0, 1000)}
     `;
 
-    const toEmail = toEmailOverride || process.env.APPROVAL_EMAIL_TO || 'developer@example.com';
+    const toEmail = toEmailOverride || process.env.APPROVAL_EMAIL_TO;
+    
+    if (!toEmail) {
+      logger.warn(`No email recipient configured for failure notification (task ${taskId}). Set APPROVAL_EMAIL_TO in environment.`);
+      return;
+    }
 
     await transporter.sendMail({
       from: emailConfig.from,
@@ -87,9 +182,16 @@ ${testResult.output.substring(0, 1000)}
 }
 
 /**
- * Creates email transporter
+ * Creates email transporter if SMTP is properly configured
+ * @throws Error if SMTP is not configured
  */
-function createTransporter() {
+function createTransporter(): nodemailer.Transporter {
+  // ISSUE 7 FIX: Validate SMTP configuration before creating transporter
+  const smtpStatus = getSmtpConfigStatus();
+  if (!smtpStatus.configured) {
+    throw new Error(`SMTP not configured: ${smtpStatus.reason}. Email notifications are disabled.`);
+  }
+  
   const emailConfig = config.approval.email;
   
   return nodemailer.createTransport({
@@ -130,6 +232,11 @@ ${summary.diffPreview.substring(0, 500)}...
 export async function sendApprovalEmail(request: ApprovalRequest): Promise<void> {
   if (config.approval.method !== 'email') {
     logger.debug('Email approval method not enabled, skipping email');
+    return;
+  }
+  
+  if (!isSmtpConfigured()) {
+    logger.debug(`Skipping approval email for task ${request.taskId} - SMTP not configured. Configure SMTP settings in config/config.json or set enableEmailNotifications to false.`);
     return;
   }
 
@@ -228,8 +335,13 @@ Reject: ${rejectionUrl}
 This approval request will expire on ${request.expiresAt.toLocaleString()}
     `;
 
-    // For now, we'll need an email address - this should come from task assignee or config
-    const toEmail = request.assigneeEmail || process.env.APPROVAL_EMAIL_TO || 'developer@example.com';
+    // Get email address from task assignee or config
+    const toEmail = request.assigneeEmail || process.env.APPROVAL_EMAIL_TO;
+    
+    if (!toEmail) {
+      logger.warn(`No email recipient configured for approval request (task ${request.taskId}). Set APPROVAL_EMAIL_TO in environment.`);
+      return;
+    }
 
     await transporter.sendMail({
       from: emailConfig.from,

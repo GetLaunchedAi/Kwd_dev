@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - ClickUp to Cursor</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .settings-container {
+            max-width: 600px;
+            margin: 0;
+        }
+        .settings-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-main);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+        }
+        .form-group {
+            margin-bottom: 24px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .form-group input:not([type="checkbox"]) {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-main);
+            border-radius: var(--radius-md);
+            background: var(--bg-input);
+            color: var(--text-main);
+            font-size: 15px;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            cursor: pointer;
+        }
+        .checkbox-group label {
+            display: inline;
+            margin-bottom: 0;
+            cursor: pointer;
+        }
+        .form-group .help-text {
+            display: block;
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .settings-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 32px;
+        }
+        
+        /* Model list container */
+        .model-list-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-main);
+            border-radius: var(--radius-md);
+            padding: 16px;
+        }
+        
+        /* Add model section */
+        .add-model-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-main);
+        }
+        
+        .add-model-label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        
+        /* Model input with suggestions dropdown */
+        .model-input-wrapper {
+            position: relative;
+            flex: 1;
+        }
+        
+        .model-autocomplete-input {
+            width: 100%;
+        }
+        
+        .model-suggestions-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 4px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-main);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            max-height: 240px;
+            overflow-y: auto;
+            z-index: 100;
+        }
+        
+        .model-suggestions-dropdown.hidden {
+            display: none;
+        }
+        
+        .model-suggestion-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 14px;
+        }
+        
+        .model-suggestion-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .model-suggestion-item.selected {
+            background: var(--color-primary-soft);
+            color: var(--color-primary);
+        }
+        
+        .model-suggestion-name {
+            font-weight: 500;
+            color: var(--text-main);
+        }
+        
+        .model-suggestion-item:hover .model-suggestion-name {
+            color: var(--color-primary);
+        }
+        
+        .model-suggestion-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: var(--color-success-soft);
+            color: var(--color-success);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        /* Model validation */
+        .model-validation {
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        .model-validation.warning {
+            background: var(--color-warning-soft);
+            color: var(--color-warning);
+            border: 1px solid var(--color-warning-light);
+        }
+        .model-validation.error {
+            background: var(--color-danger-soft);
+            color: var(--color-danger);
+            border: 1px solid var(--color-danger-light);
+        }
+        .model-validation.success {
+            background: var(--color-success-soft);
+            color: var(--color-success);
+            border: 1px solid var(--color-success-light);
+        }
+        .model-validation.hidden {
+            display: none;
+        }
+        
+        /* Model actions */
+        .model-actions-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-main);
+        }
+        
+        .known-models-info {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .known-models-info span {
+            font-weight: 600;
+            color: var(--color-primary);
+        }
+        
+        /* Model input row */
+        .model-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        
+        /* Model list styling */
+        .model-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .model-list:empty::before {
+            content: "No models added yet. Add models below.";
+            display: block;
+            padding: 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-style: italic;
+        }
+        
+        /* SMTP Warning */
+        .smtp-warning {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: var(--color-warning-soft, #fff3cd);
+            border: 1px solid var(--color-warning-light, #ffc107);
+            border-radius: var(--radius-md);
+            color: var(--color-warning, #856404);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .smtp-warning i {
+            flex-shrink: 0;
+            width: 18px;
+            height: 18px;
+            margin-top: 1px;
+        }
+        .smtp-warning code {
+            background: rgba(0, 0, 0, 0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .smtp-warning.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item active">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-title">
+                    <h1>System Settings</h1>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div class="settings-container">
+                    <div class="settings-card">
+                        <form id="settingsForm">
+                            <div class="form-group">
+                                <label for="sessionDuration">Session Duration (Hours)</label>
+                                <input type="number" id="sessionDuration" min="1" max="720" required>
+                                <span class="help-text">How long you will stay logged in before needing to reconnect ClickUp. Default is 3 hours.</span>
+                            </div>
+
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="enableEmailNotifications" class="form-checkbox">
+                                    <label for="enableEmailNotifications">Enable Email Notifications</label>
+                                </div>
+                                <span class="help-text">If disabled, the system will not send approval or failure emails for tasks. Approval requests will still be visible on the dashboard.</span>
+                                <div id="smtpWarning" class="smtp-warning hidden">
+                                    <i data-lucide="alert-triangle"></i>
+                                    <span>SMTP is not configured. Email notifications will be skipped until SMTP settings are properly configured in <code>config/config.json</code>.</span>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Git User Configuration</label>
+                                <div style="display: flex; flex-direction: column; gap: 12px;">
+                                    <div>
+                                        <input type="text" id="gitUserName" placeholder="Git User Name (e.g., John Doe)">
+                                    </div>
+                                    <div>
+                                        <input type="email" id="gitUserEmail" placeholder="Git User Email (e.g., john@example.com)">
+                                    </div>
+                                </div>
+                                <span class="help-text">Set the git user.name and user.email used when committing changes in the tool's terminal.</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="defaultModel">Default AI Model</label>
+                                <select id="defaultModel" name="defaultModel" class="modal-input">
+                                    <!-- Populated dynamically -->
+                                </select>
+                                <span class="help-text">The default AI model used when no specific model is selected.</span>
+                            </div>
+
+                            <!-- GitHub Publishing Section -->
+                            <div class="form-group">
+                                <label>GitHub Publishing</label>
+                                <div class="github-section">
+                                    <div class="github-section-header">
+                                        <i data-lucide="github"></i>
+                                        <h4>GitHub Organization</h4>
+                                    </div>
+                                    <div class="github-org-input-wrapper">
+                                        <input type="text" id="githubOrg" placeholder="e.g., my-org or username" pattern="^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$">
+                                    </div>
+                                    <div id="githubOrgValidation" class="github-validation hidden"></div>
+                                    <span class="help-text">Enter the GitHub organization or username where demo repos will be published. Must be a valid GitHub slug (letters, numbers, hyphens).</span>
+                                    <div id="githubServerWarning" class="github-server-warning hidden">
+                                        <i data-lucide="alert-triangle"></i>
+                                        <span>Server not configured with a GitHub Personal Access Token. Publishing will fail until configured in the server environment.</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Netlify Deployment Section -->
+                            <div class="form-group">
+                                <label>Netlify Deployment</label>
+                                <div class="netlify-section" style="background: var(--bg-secondary); border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 16px;">
+                                    <div class="netlify-section-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                                        <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" style="color: #00C7B7;">
+                                            <path d="M161.3,37.2l-50.1,50.1c-1.2,1.2-2.9,1.6-4.5,1.2l-22.9-6.3c-1.7-0.5-3.6,0-4.8,1.3l-23.1,23.1c-1.2,1.2-1.7,3-1.3,4.6l6.3,22.9c0.4,1.6,0,3.3-1.2,4.5l-50.1,50.1c-1.7,1.7-1.7,4.5,0,6.2l55.4,55.4c1.7,1.7,4.5,1.7,6.2,0l50.1-50.1c1.2-1.2,2.9-1.6,4.5-1.2l22.9,6.3c1.6,0.4,3.4,0,4.6-1.3l23.1-23.1c1.2-1.2,1.7-3,1.3-4.6l-6.3-22.9c-0.4-1.6,0-3.3,1.2-4.5l50.1-50.1c1.7-1.7,1.7-4.5,0-6.2L167.5,37.2C165.8,35.5,163,35.5,161.3,37.2z"/>
+                                        </svg>
+                                        <h4 style="margin: 0; font-size: 14px; font-weight: 600;">Netlify Auto-Deployment</h4>
+                                    </div>
+                                    
+                                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                                        <!-- Token Status -->
+                                        <div id="netlifyTokenStatus" class="netlify-status" style="padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; display: flex; align-items: center; gap: 8px;">
+                                            <i data-lucide="loader" class="animate-spin" style="width: 14px; height: 14px;"></i>
+                                            <span>Checking configuration...</span>
+                                        </div>
+
+                                        <!-- Account Slug -->
+                                        <div>
+                                            <label for="netlifyAccountSlug" style="font-size: 13px; margin-bottom: 4px; display: block;">Account/Team Slug</label>
+                                            <input type="text" id="netlifyAccountSlug" placeholder="e.g., my-team-name" style="width: 100%; padding: 10px; font-size: 14px;">
+                                            <span class="help-text" style="font-size: 12px;">Find this in your Netlify team URL: app.netlify.com/teams/<strong>your-slug</strong></span>
+                                        </div>
+
+                                        <!-- Build Command (optional override) -->
+                                        <div>
+                                            <label for="netlifyBuildCommand" style="font-size: 13px; margin-bottom: 4px; display: block;">Build Command (optional)</label>
+                                            <input type="text" id="netlifyBuildCommand" placeholder="npm run build (auto-detected)">
+                                            <span class="help-text" style="font-size: 12px;">Leave empty to auto-detect from package.json</span>
+                                        </div>
+
+                                        <!-- Publish Directory -->
+                                        <div>
+                                            <label for="netlifyPublishDir" style="font-size: 13px; margin-bottom: 4px; display: block;">Publish Directory</label>
+                                            <input type="text" id="netlifyPublishDir" placeholder="public" value="public">
+                                            <span class="help-text" style="font-size: 12px;">Directory containing built files (usually "public" for Eleventy)</span>
+                                        </div>
+
+                                        <!-- OAuth Configured Checkbox -->
+                                        <div class="checkbox-group" style="margin-top: 8px;">
+                                            <input type="checkbox" id="netlifyOauthConfigured" class="form-checkbox">
+                                            <label for="netlifyOauthConfigured" style="font-size: 13px;">I have installed the Netlify GitHub App</label>
+                                        </div>
+                                        
+                                        <!-- OAuth Warning -->
+                                        <div id="netlifyOauthWarning" class="netlify-oauth-warning" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; background: var(--color-warning-soft, #fff3cd); border: 1px solid var(--color-warning-light, #ffc107); border-radius: var(--radius-md); color: var(--color-warning, #856404); font-size: 13px; line-height: 1.5;">
+                                            <i data-lucide="alert-triangle" style="flex-shrink: 0; width: 18px; height: 18px; margin-top: 1px;"></i>
+                                            <div>
+                                                <strong>Important:</strong> Netlify needs access to your GitHub repos. 
+                                                <a href="https://github.com/apps/netlify/installations/new" target="_blank" rel="noopener" style="color: inherit; font-weight: 600;">Install the Netlify GitHub App</a> 
+                                                and grant access to your organization before deploying.
+                                            </div>
+                                        </div>
+
+                                        <!-- Test Connection Button -->
+                                        <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                            <button type="button" id="testNetlifyBtn" class="btn btn-secondary btn-sm">
+                                                <i data-lucide="wifi"></i> Test Connection
+                                            </button>
+                                            <span id="netlifyTestResult" style="font-size: 13px; display: flex; align-items: center; gap: 4px;"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Available Models</label>
+                                <div class="model-list-container">
+                                    <!-- Already added models list (shown first) -->
+                                    <ul id="modelList" class="model-list">
+                                        <!-- Populated dynamically -->
+                                    </ul>
+                                    
+                                    <!-- Add new model section -->
+                                    <div class="add-model-section">
+                                        <label class="add-model-label">Add New Model</label>
+                                        <div class="model-input-row">
+                                            <div class="model-input-wrapper">
+                                                <input type="text" id="newModelInput" class="modal-input model-autocomplete-input" placeholder="Start typing to see suggestions..." autocomplete="off">
+                                                <div id="modelSuggestionsDropdown" class="model-suggestions-dropdown hidden">
+                                                    <!-- Populated dynamically with filtered suggestions -->
+                                                </div>
+                                            </div>
+                                            <button type="button" id="addModelBtn" class="btn btn-secondary btn-sm">
+                                                <i data-lucide="plus"></i> Add
+                                            </button>
+                                        </div>
+                                        <div id="modelValidation" class="model-validation hidden">
+                                            <span class="validation-message"></span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Action buttons -->
+                                    <div class="model-actions-row">
+                                        <button type="button" id="refreshModelsBtn" class="btn btn-secondary btn-sm" title="Refresh known models list">
+                                            <i data-lucide="download-cloud"></i> Refresh Models
+                                        </button>
+                                        <button type="button" id="resetModelsBtn" class="btn btn-ghost btn-sm">
+                                            <i data-lucide="refresh-cw"></i> Reset to Defaults
+                                        </button>
+                                    </div>
+                                    <div id="knownModelsInfo" class="known-models-info">
+                                        <span id="knownModelsCount">0</span> known models available
+                                    </div>
+                                </div>
+                                <span class="help-text">Start typing a model name to see suggestions from known Cursor-supported models.</span>
+                            </div>
+
+                            <div class="settings-actions">
+                                <button type="submit" id="saveBtn" class="btn btn-primary">
+                                    <i data-lucide="save"></i> Save Settings
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="settings.js"></script>
+</body>
+</html>
+
+
+
+
+

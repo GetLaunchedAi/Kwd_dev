@@ -16,16 +16,10 @@ const activeOperations = new Map<string, { progress: CloneProgress[] }>();
 
 // API endpoint to start cloning
 app.post('/api/clone', async (req, res) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:18',message:'POST /api/clone endpoint called',data:{hasUsername:!!req.body.username,hasToken:!!req.body.token,directory:req.body.directory},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
 
   const { username, token, directory, includePrivate, useSSH, updateExisting, filter } = req.body;
 
   if (!username || !token) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:22',message:'Validation failed - missing username or token',data:{hasUsername:!!username,hasToken:!!token},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     return res.status(400).json({ error: 'Username and token are required' });
   }
 
@@ -33,9 +27,6 @@ app.post('/api/clone', async (req, res) => {
   const progress: CloneProgress[] = [];
   activeOperations.set(operationId, { progress });
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:28',message:'Starting background clone operation',data:{operationId,username,directory:directory||'./repos'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
 
   // Start cloning in background
   (async () => {
@@ -44,15 +35,9 @@ app.post('/api/clone', async (req, res) => {
         progress.push(p);
       };
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:35',message:'Creating GitHubCloneAll instance',data:{hasToken:!!token},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
 
       const cloner = new GitHubCloneAll(token, progressCallback);
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:40',message:'Calling cloneAll',data:{username,directory:directory||'./repos',includePrivate,useSSH,updateExisting,filter},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
 
       const result = await cloner.cloneAll(username, directory || './repos', {
         includePrivate: includePrivate || false,
@@ -61,9 +46,6 @@ app.post('/api/clone', async (req, res) => {
         filter: filter || undefined,
       });
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:50',message:'Clone operation completed successfully',data:{success:result.success,failed:result.failed,total:result.total},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
 
       // Mark as complete
       progress.push({
@@ -74,9 +56,6 @@ app.post('/api/clone', async (req, res) => {
         message: `Completed: ${result.success} succeeded, ${result.failed} failed`
       });
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:60',message:'Clone operation failed with error',data:{errorMessage:error.message,errorStack:error.stack,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
 
       progress.push({
         current: 0,
@@ -88,9 +67,6 @@ app.post('/api/clone', async (req, res) => {
     }
   })();
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:66',message:'Sending response with operationId',data:{operationId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
 
   res.json({ operationId });
 });
@@ -149,20 +125,8 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:119',message:'Server started successfully',data:{port:PORT},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   console.log(`GitHub Clone All Web UI running at http://localhost:${PORT}`);
 });
 
-// #region agent log
-process.on('uncaughtException', (error) => {
-  fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:125',message:'Uncaught exception - server may crash',data:{errorMessage:error.message,errorStack:error.stack,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:129',message:'Unhandled promise rejection - server may crash',data:{reason:reason?.toString(),promise:promise?.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-});
-// #endregion
 
 

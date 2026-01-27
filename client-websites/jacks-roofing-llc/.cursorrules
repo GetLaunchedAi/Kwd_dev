@@ -1,0 +1,20 @@
+# Automated Task Processing
+
+IMPORTANT: There is a task file that needs your attention.
+
+## Task File Location
+D:\Users\socce\Desktop\KWD Dev\Kwd_dev\client-websites\jacks-roofing-llc\CURSOR_TASK.md
+
+## Instructions
+1. Read the CURSOR_TASK.md file in this workspace
+2. Follow all instructions in that file
+3. Implement the required changes
+4. Test your changes locally (run the app and check for errors)
+5. Commit your changes locally when complete
+6. DO NOT PUSH TO GITHUB. The workflow tool will handle the push after manual approval.
+
+## Expected Behavior
+You should automatically start working on the task described in CURSOR_TASK.md when this workspace opens.
+
+---
+Generated: 2026-01-05T01:33:01.677Z

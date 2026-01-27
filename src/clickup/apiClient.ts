@@ -49,10 +49,28 @@ export interface ClickUpTask {
   }>;
   attachments?: Array<{
     id: string;
-    name: string;
-    url: string;
+    name?: string;
+    title?: string;
+    extension?: string;
+    thumbnail_medium?: string;
+    thumbnail_small?: string;
+    url?: string;
+    url_w_query?: string;
+    mimetype?: string;
   }>;
   folder?: {
+    id: string;
+    name: string;
+  };
+  list?: {
+    id: string;
+    name: string;
+  };
+  project?: {
+    id: string;
+    name: string;
+  };
+  space?: {
     id: string;
     name: string;
   };
@@ -61,6 +79,12 @@ export interface ClickUpTask {
     name: string;
     value?: any;
   }>;
+  priority?: {
+    id: string;
+    priority: string;
+    color: string;
+    orderindex: string;
+  };
 }
 
 export interface ClickUpWebhookEvent {
@@ -110,22 +134,10 @@ class ClickUpApiClient {
       // Ensure minimum delay between requests
       await this.ensureRequestDelay();
       
-      // #region agent log
-      debugLog('apiClient.ts:61', 'Request interceptor called', { url: config.url, method: config.method }, 'D');
-      // #endregion
       const token = await this.getAuthToken();
-      // #region agent log
-      debugLog('apiClient.ts:64', 'Token retrieved from getAuthToken', { tokenExists: !!token, tokenLength: token?.length || 0, tokenPreview: token?.substring(0, 20) || 'null' }, 'A,D');
-      // #endregion
       if (token) {
         config.headers['Authorization'] = token;
-        // #region agent log
-        debugLog('apiClient.ts:68', 'Authorization header set', { headerValue: token.substring(0, 30) + '...', headerFormat: 'direct' }, 'C');
-        // #endregion
       } else {
-        // #region agent log
-        debugLog('apiClient.ts:71', 'No token available - Authorization header NOT set', {}, 'D');
-        // #endregion
       }
       return config;
     });
@@ -203,35 +215,24 @@ class ClickUpApiClient {
    * Gets the authorization token (API token or OAuth access token)
    */
   private async getAuthToken(): Promise<string | null> {
-    // #region agent log
-    debugLog('apiClient.ts:86', 'getAuthToken called - checking config', { hasApiToken: !!config.clickup.apiToken, hasAccessToken: !!config.clickup.accessToken }, 'A');
-    // #endregion
-    // Try API token first (for backward compatibility)
-    if (config.clickup.apiToken) {
-      // #region agent log
-      debugLog('apiClient.ts:90', 'Using API token from config', {}, 'A');
-      // #endregion
+    // Try OAuth access token from file first (this is the preferred method)
+    const { getAccessToken } = await import('./oauthService');
+    const oauthToken = await getAccessToken();
+    if (oauthToken) {
+      return oauthToken;
+    }
+
+    // Try API token as fallback
+    if (config.clickup.apiToken && config.clickup.apiToken !== 'placeholder') {
       return config.clickup.apiToken;
     }
 
-    // Try OAuth access token
+    // Try explicit accessToken from config
     if (config.clickup.accessToken) {
-      // #region agent log
-      debugLog('apiClient.ts:97', 'Using access token from config', {}, 'A');
-      // #endregion
       return config.clickup.accessToken;
     }
 
-    // Try loading from file (OAuth token storage)
-    // #region agent log
-    debugLog('apiClient.ts:104', 'Loading token from file via getAccessToken', {}, 'A');
-    // #endregion
-    const { getAccessToken } = await import('./oauthService');
-    const token = await getAccessToken();
-    // #region agent log
-    debugLog('apiClient.ts:107', 'Token loaded from file', { tokenReturned: !!token, tokenLength: token?.length || 0 }, 'A');
-    // #endregion
-    return token;
+    return null;
   }
 
   /**
@@ -240,18 +241,9 @@ class ClickUpApiClient {
   async getTask(taskId: string): Promise<ClickUpTask> {
     try {
       logger.debug(`Fetching ClickUp task: ${taskId}`);
-      // #region agent log
-      debugLog('apiClient.ts:140', 'getTask called - before API request', { taskId }, 'D');
-      // #endregion
       const response = await this.api.get(`/task/${taskId}`);
-      // #region agent log
-      debugLog('apiClient.ts:143', 'getTask API request successful', { status: response.status, taskId }, 'C');
-      // #endregion
       return response.data as ClickUpTask;
     } catch (error: any) {
-      // #region agent log
-      debugLog('apiClient.ts:147', 'getTask API request failed', { taskId, statusCode: error.response?.status || 'unknown', statusText: error.response?.statusText || error.message, errorMessage: error.message }, 'C');
-      // #endregion
       logger.error(`Error fetching task ${taskId}: ${error.message}`);
       throw error;
     }
@@ -282,6 +274,21 @@ class ClickUpApiClient {
       });
     } catch (error: any) {
       logger.error(`Error updating task status: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Updates task description
+   */
+  async updateTaskDescription(taskId: string, description: string): Promise<void> {
+    try {
+      logger.debug(`Updating task ${taskId} description`);
+      await this.api.put(`/task/${taskId}`, {
+        description: description,
+      });
+    } catch (error: any) {
+      logger.error(`Error updating task description: ${error.message}`);
       throw error;
     }
   }

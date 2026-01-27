@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Details - KWD Dev</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-nav">
+                    <a href="/index.html" class="back-link" title="Back to Dashboard">
+                        <i data-lucide="arrow-left"></i>
+                    </a>
+                    <div class="header-title-wrapper">
+                        <h1>Demo Details</h1>
+                        <div id="autoRefreshIndicator" class="auto-refresh-indicator hidden">
+                            <div class="auto-refresh-dot"></div>
+                            <span>Live</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="header-actions">
+                    <button id="refreshDemoBtn" class="btn btn-secondary btn-icon" title="Refresh demo details">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Refresh</span>
+                    </button>
+                    <a id="previewLink" href="#" target="_blank" class="btn btn-primary btn-icon hidden">
+                        <i data-lucide="external-link"></i>
+                        <span>Open Preview</span>
+                    </a>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div id="loading" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Fetching demo details...</p>
+                </div>
+                
+                <div id="error" class="error-state hidden">
+                    <i data-lucide="x-circle"></i>
+                    <div id="errorMessage" class="error-message"></div>
+                    <button id="retryBtn" class="btn btn-primary">Retry</button>
+                </div>
+
+                <div id="demoDetails" class="hidden">
+                    <div class="task-grid-layout">
+                        <div class="main-column">
+                            <!-- Demo Header Card -->
+                            <section class="card demo-header-card">
+                                <div class="demo-header-main">
+                                    <div class="demo-title-group">
+                                        <div class="demo-title-badges">
+                                            <span class="demo-badge-lg">Demo</span>
+                                            <span id="demoState" class="state-badge"></span>
+                                        </div>
+                                        <h2 id="businessName" class="demo-main-title"></h2>
+                                        <p id="clientSlug" class="demo-slug"></p>
+                                    </div>
+                                    <div class="demo-actions">
+                                        <button id="killDemoBtn" class="btn btn-warning btn-sm" title="Stop demo and remove from queue">
+                                            <i data-lucide="x-octagon"></i>
+                                            Kill Demo
+                                        </button>
+                                        <button id="deleteDemoBtn" class="btn btn-danger btn-sm">
+                                            <i data-lucide="trash-2"></i>
+                                            Delete Demo
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Progress Stepper Card -->
+                            <section class="card demo-progress-card-lg">
+                                <div class="card-header">
+                                    <h3><i data-lucide="sparkles"></i> AI Customization Progress</h3>
+                                    <span id="demoStepCounter" class="demo-step-counter">Step 1 of 4</span>
+                                </div>
+                                <div class="demo-progress-bar-lg">
+                                    <div id="demoProgressBar" class="demo-progress-fill" style="width: 25%"></div>
+                                </div>
+                                <div class="demo-steps-container">
+                                    <div class="demo-step-item" data-step="1">
+                                        <div class="demo-step-icon">
+                                            <i data-lucide="palette"></i>
+                                        </div>
+                                        <div class="demo-step-info">
+                                            <span class="demo-step-name">Branding</span>
+                                            <span class="demo-step-desc">Colors, fonts, logo integration</span>
+                                        </div>
+                                        <span class="demo-step-status" id="step1Status">Pending</span>
+                                    </div>
+                                    <div class="demo-step-item" data-step="2">
+                                        <div class="demo-step-icon">
+                                            <i data-lucide="type"></i>
+                                        </div>
+                                        <div class="demo-step-info">
+                                            <span class="demo-step-name">Copywriting</span>
+                                            <span class="demo-step-desc">Headlines, descriptions, CTAs</span>
+                                        </div>
+                                        <span class="demo-step-status" id="step2Status">Pending</span>
+                                    </div>
+                                    <div class="demo-step-item" data-step="3">
+                                        <div class="demo-step-icon">
+                                            <i data-lucide="image"></i>
+                                        </div>
+                                        <div class="demo-step-info">
+                                            <span class="demo-step-name">Imagery</span>
+                                            <span class="demo-step-desc">Hero images, icons, photos</span>
+                                        </div>
+                                        <span class="demo-step-status" id="step3Status">Pending</span>
+                                    </div>
+                                    <div class="demo-step-item" data-step="4">
+                                        <div class="demo-step-icon">
+                                            <i data-lucide="check-square"></i>
+                                        </div>
+                                        <div class="demo-step-info">
+                                            <span class="demo-step-name">Review</span>
+                                            <span class="demo-step-desc">Final polish and testing</span>
+                                        </div>
+                                        <span class="demo-step-status" id="step4Status">Pending</span>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Agent Activity Card -->
+                            <section id="agentActivitySection" class="card agent-activity-card">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="activity"></i> Agent Activity</h3>
+                                    <div class="agent-activity-controls">
+                                        <button id="toggleLogsBtn" class="btn btn-secondary btn-sm">Show Logs</button>
+                                        <button id="toggleEventsViewerBtn" class="btn btn-primary btn-sm">Live Events</button>
+                                    </div>
+                                </div>
+                                <div class="agent-current-status">
+                                    <div class="agent-status-indicator">
+                                        <span id="agentStatusDot" class="agent-dot idle"></span>
+                                        <span id="agentStatusText">Idle</span>
+                                    </div>
+                                    <span id="agentCurrentStep" class="agent-step"></span>
+                                </div>
+                                
+                                <!-- Legacy Logs Container (kept for backwards compatibility) -->
+                                <div id="agentLogsContainer" class="agent-logs collapsed">
+                                    <div id="agentLogs" class="agent-logs-content">
+                                        <p class="no-logs">No activity logs yet</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Live Events Viewer (New) -->
+                                <div id="eventsViewerContainer" class="events-viewer-wrapper collapsed">
+                                    <div id="eventsViewer"></div>
+                                </div>
+                            </section>
+
+                            <!-- Screenshots Section -->
+                            <section id="screenshotsSection" class="card screenshots-card">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="monitor"></i> Visual Progress</h3>
+                                    <div class="screenshot-controls">
+                                        <select id="screenshotStepSelect" class="step-select">
+                                            <option value="latest">Latest</option>
+                                            <option value="0">Initial</option>
+                                            <option value="100">Step 1</option>
+                                            <option value="200">Step 2</option>
+                                            <option value="300">Step 3</option>
+                                            <option value="400">Step 4</option>
+                                        </select>
+                                        <button id="refreshScreenshotsBtn" class="btn btn-secondary btn-sm" title="Refresh">
+                                            <i data-lucide="refresh-cw"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="demoScreenshotGallery" class="screenshot-gallery-container">
+                                    <!-- Screenshot gallery will be rendered here -->
+                                </div>
+                            </section>
+                        </div>
+
+                        <div class="side-column">
+                            <!-- Business Context Card -->
+                            <section class="card context-card">
+                                <div class="card-header">
+                                    <h3><i data-lucide="building-2"></i> Business Info</h3>
+                                </div>
+                                <div class="context-list">
+                                    <div class="context-item">
+                                        <span class="context-label">Email</span>
+                                        <span class="context-value" id="contextEmail">N/A</span>
+                                    </div>
+                                    <div class="context-item">
+                                        <span class="context-label">Phone</span>
+                                        <span class="context-value" id="contextPhone">N/A</span>
+                                    </div>
+                                    <div class="context-item">
+                                        <span class="context-label">Address</span>
+                                        <span class="context-value" id="contextAddress">N/A</span>
+                                    </div>
+                                    <div class="context-item">
+                                        <span class="context-label">Services</span>
+                                        <span class="context-value" id="contextServices">N/A</span>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Branding Card -->
+                            <section class="card branding-card">
+                                <div class="card-header">
+                                    <h3><i data-lucide="palette"></i> Branding</h3>
+                                </div>
+                                <div class="branding-list">
+                                    <div class="branding-item">
+                                        <span class="branding-label">Primary Color</span>
+                                        <div class="color-display">
+                                            <span id="colorSwatch" class="color-swatch" style="background-color: #000000;"></span>
+                                            <code id="primaryColor">#000000</code>
+                                        </div>
+                                    </div>
+                                    <div class="branding-item">
+                                        <span class="branding-label">Secondary Color</span>
+                                        <div class="color-display">
+                                            <span id="secondaryColorSwatch" class="color-swatch" style="background-color: #ffffff;"></span>
+                                            <code id="secondaryColor">#ffffff</code>
+                                        </div>
+                                    </div>
+                                    <div class="branding-item">
+                                        <span class="branding-label">Font Family</span>
+                                        <span class="context-value" id="fontFamily">sans-serif</span>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Timestamps Card -->
+                            <section class="card timestamps-card">
+                                <div class="card-header">
+                                    <h3><i data-lucide="clock"></i> Timestamps</h3>
+                                </div>
+                                <div class="timestamps-list">
+                                    <div class="timestamp-item">
+                                        <span class="timestamp-label">Created</span>
+                                        <span class="timestamp-value" id="createdAt">-</span>
+                                    </div>
+                                    <div class="timestamp-item">
+                                        <span class="timestamp-label">Last Updated</span>
+                                        <span class="timestamp-value" id="updatedAt">-</span>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Publishing Status Card -->
+                            <section id="publishingSection" class="card publishing-card hidden">
+                                <div class="card-header">
+                                    <h3><i data-lucide="cloud"></i> Publishing Status</h3>
+                                </div>
+                                <div class="publishing-content">
+                                    <!-- GitHub Status -->
+                                    <div class="publish-item">
+                                        <div class="publish-item-header">
+                                            <i data-lucide="github" style="width: 16px; height: 16px;"></i>
+                                            <span class="publish-label">GitHub</span>
+                                            <span id="githubStatus" class="publish-status">-</span>
+                                        </div>
+                                        <div id="githubDetails" class="publish-details hidden">
+                                            <a id="githubRepoLink" href="#" target="_blank" class="publish-link">
+                                                <i data-lucide="external-link" style="width: 12px; height: 12px;"></i>
+                                                <span id="githubRepoName">-</span>
+                                            </a>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Netlify Status -->
+                                    <div class="publish-item">
+                                        <div class="publish-item-header">
+                                            <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" style="color: #00C7B7;">
+                                                <path d="M161.3,37.2l-50.1,50.1c-1.2,1.2-2.9,1.6-4.5,1.2l-22.9-6.3c-1.7-0.5-3.6,0-4.8,1.3l-23.1,23.1c-1.2,1.2-1.7,3-1.3,4.6l6.3,22.9c0.4,1.6,0,3.3-1.2,4.5l-50.1,50.1c-1.7,1.7-1.7,4.5,0,6.2l55.4,55.4c1.7,1.7,4.5,1.7,6.2,0l50.1-50.1c1.2-1.2,2.9-1.6,4.5-1.2l22.9,6.3c1.6,0.4,3.4,0,4.6-1.3l23.1-23.1c1.2-1.2,1.7-3,1.3-4.6l-6.3-22.9c-0.4-1.6,0-3.3,1.2-4.5l50.1-50.1c1.7-1.7,1.7-4.5,0-6.2L167.5,37.2C165.8,35.5,163,35.5,161.3,37.2z"/>
+                                            </svg>
+                                            <span class="publish-label">Netlify</span>
+                                            <span id="netlifyStatus" class="publish-status">-</span>
+                                        </div>
+                                        <div id="netlifyDetails" class="publish-details hidden">
+                                            <a id="netlifySiteLink" href="#" target="_blank" class="publish-link">
+                                                <i data-lucide="globe" style="width: 12px; height: 12px;"></i>
+                                                <span>Live Site</span>
+                                            </a>
+                                            <a id="netlifyAdminLink" href="#" target="_blank" class="publish-link">
+                                                <i data-lucide="settings" style="width: 12px; height: 12px;"></i>
+                                                <span>Dashboard</span>
+                                            </a>
+                                        </div>
+                                        <div id="netlifyError" class="publish-error hidden">
+                                            <i data-lucide="alert-circle" style="width: 14px; height: 14px;"></i>
+                                            <span id="netlifyErrorText">-</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Retry Netlify Button (shown on deploy_failed state) -->
+                                    <div id="netlifyRetrySection" class="publish-actions hidden">
+                                        <button id="retryNetlifyBtn" class="btn btn-primary btn-sm w-full">
+                                            <i data-lucide="refresh-cw"></i>
+                                            Retry Netlify Deploy
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Approval Actions Card (conditionally shown) -->
+                            <section id="approvalSection" class="card approval-card hidden">
+                                <div class="card-header">
+                                    <h3><i data-lucide="check-circle"></i> Review & Approve</h3>
+                                </div>
+                                <div class="approval-content">
+                                    <p id="approvalPrompt">Review the current step and approve or request changes.</p>
+                                    
+                                    <!-- Step Approval Buttons (shown for intermediate steps) -->
+                                    <div id="stepApprovalButtons" class="approval-buttons">
+                                        <button id="approveStepBtn" class="btn btn-success">
+                                            <i data-lucide="arrow-right"></i>
+                                            Approve & Continue
+                                        </button>
+                                        <button id="requestStepChangesBtn" class="btn btn-warning">
+                                            <i data-lucide="edit-3"></i>
+                                            Request Changes
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- Final Approval Buttons (shown for last step) -->
+                                    <div id="finalApprovalButtons" class="approval-buttons hidden">
+                                        <button id="approvePublishBtn" class="btn btn-success">
+                                            <i data-lucide="rocket"></i>
+                                            Approve & Publish
+                                        </button>
+                                        <button id="requestRevisionBtn" class="btn btn-warning">
+                                            <i data-lucide="edit-3"></i>
+                                            Request Revision
+                                        </button>
+                                        <button id="rejectDemoBtn" class="btn btn-reject">
+                                            <i data-lucide="trash-2"></i>
+                                            Reject Demo
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
+                            
+                            <!-- Request Changes Modal -->
+                            <div id="stepChangesModal" class="modal-overlay hidden">
+                                <div class="modal">
+                                    <div class="modal-header">
+                                        <h3 class="modal-title">Request Step Changes</h3>
+                                        <button class="modal-close" id="closeStepChangesModal">&times;</button>
+                                    </div>
+                                    <div class="modal-body feedback-modal-content">
+                                        <h4>What would you like changed in this step?</h4>
+                                        <textarea 
+                                            id="stepFeedbackInput" 
+                                            class="feedback-textarea modal-input" 
+                                            placeholder="Describe what you'd like different..."
+                                            rows="4"
+                                        ></textarea>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button class="btn btn-secondary" id="cancelStepChangesBtn">Cancel</button>
+                                        <button class="btn btn-warning" id="submitStepChangesBtn" disabled>
+                                            <i data-lucide="send"></i>
+                                            <span>Send & Retry Step</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Reject Demo Modal -->
+                            <div id="rejectDemoModal" class="modal-overlay hidden">
+                                <div class="modal">
+                                    <div class="modal-header">
+                                        <h3 class="modal-title">Reject Demo</h3>
+                                        <button class="modal-close" id="closeRejectDemoModal">&times;</button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p>Are you sure you want to reject and delete this demo?</p>
+                                        <p class="text-hint" style="color: var(--color-danger);">
+                                            This will permanently delete all demo files. This action cannot be undone.
+                                        </p>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button class="btn btn-secondary" id="cancelRejectDemoBtn">Cancel</button>
+                                        <button class="btn btn-danger" id="confirmRejectDemoBtn">
+                                            <i data-lucide="trash-2"></i>
+                                            <span>Yes, Delete Demo</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Agent Feedback Card -->
+                            <section id="agentFeedbackSection" class="card feedback-card">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="message-circle"></i> Agent Feedback</h3>
+                                    <button id="toggleFeedbackHistoryBtn" class="btn btn-secondary btn-sm">History</button>
+                                </div>
+                                <div class="feedback-content p-md">
+                                    <p class="feedback-hint mb-md">Send feedback to guide the agent. This will be applied on the next step or rerun.</p>
+                                    <textarea id="agentFeedbackInput" class="feedback-textarea" placeholder="Enter your feedback for the agent..." rows="4"></textarea>
+                                    <div class="feedback-options mt-sm">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="applyOnNextRunCheckbox" checked>
+                                            <span>Apply on next run</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="triggerRerunCheckbox">
+                                            <span>Trigger rerun immediately</span>
+                                        </label>
+                                    </div>
+                                    <div class="feedback-actions mt-md">
+                                        <button id="submitAgentFeedbackBtn" class="btn btn-primary w-full" disabled>
+                                            <i data-lucide="send"></i> Submit Feedback
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="feedbackHistoryContainer" class="feedback-history collapsed">
+                                    <div class="feedback-history-header">
+                                        <h4>Feedback History</h4>
+                                        <span id="feedbackHistoryCount" class="badge">0</span>
+                                    </div>
+                                    <div id="feedbackHistoryList" class="feedback-history-list">
+                                        <p class="no-feedback">No feedback submitted yet</p>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete Demo</h3>
+                <button class="modal-close" id="closeDeleteModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete this demo? This action cannot be undone.</p>
+                <p class="text-hint mt-sm">This will remove all demo files from <code id="deleteSlugDisplay"></code></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelDeleteBtn">Cancel</button>
+                <button class="btn btn-danger" id="confirmDeleteBtn">Delete Demo</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="utils/formatting.js"></script>
+    <script src="utils/screenshot-gallery.js"></script>
+    <script src="utils/events-viewer.js"></script>
+    <script src="utils/live-status.js"></script>
+    <script src="demo.js"></script>
+</body>
+</html>

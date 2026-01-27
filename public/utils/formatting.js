@@ -3,13 +3,26 @@
 const FormattingUtils = {
     /**
      * Format date to relative time (e.g., "2 hours ago", "3 days ago")
+     * Handles edge cases: null, invalid dates, and future dates
      */
     formatRelativeTime(date) {
         if (!date) return 'Unknown';
         
         const now = new Date();
         const then = new Date(date);
+        
+        // Handle invalid dates (NaN check)
+        if (isNaN(then.getTime())) {
+            return 'Unknown';
+        }
+        
         const diffMs = now - then;
+        
+        // Handle future dates gracefully
+        if (diffMs < 0) {
+            return 'just now';
+        }
+        
         const diffSecs = Math.floor(diffMs / 1000);
         const diffMins = Math.floor(diffSecs / 60);
         const diffHours = Math.floor(diffMins / 60);

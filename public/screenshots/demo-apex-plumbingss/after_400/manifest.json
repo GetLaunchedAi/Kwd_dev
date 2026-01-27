@@ -1,0 +1,497 @@
+{
+  "taskId": "demo-apex-plumbingss",
+  "prefix": "after",
+  "iteration": 400,
+  "timestamp": "2026-01-11T18:33:14.598Z",
+  "baseUrl": "http://localhost:8081",
+  "totalPages": 9,
+  "totalSections": 69,
+  "pages": [
+    {
+      "url": "http://localhost:8081/plumbing-services",
+      "pageSlug": "plumbing-services",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/__fullpage.png",
+      "sectionCount": 8,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-int-hero.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/002__section__id-int-hero.png",
+          "tag": "section",
+          "id": "int-hero"
+        },
+        {
+          "name": "003__section__id-content-page-1402.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/003__section__id-content-page-1402.png",
+          "tag": "section",
+          "id": "content-page-1402"
+        },
+        {
+          "name": "004__section__id-services-563.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/004__section__id-services-563.png",
+          "tag": "section",
+          "id": "services-563"
+        },
+        {
+          "name": "005__section__id-faq-254.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/005__section__id-faq-254.png",
+          "tag": "section",
+          "id": "faq-254"
+        },
+        {
+          "name": "006__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/006__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "007__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/007__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "008__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/plumbing-services/008__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/",
+      "pageSlug": "home",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/home/__fullpage.png",
+      "sectionCount": 10,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-hero-2042.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/002__section__id-hero-2042.png",
+          "tag": "section",
+          "id": "hero-2042"
+        },
+        {
+          "name": "003__section__id-services-1329.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/003__section__id-services-1329.png",
+          "tag": "section",
+          "id": "services-1329"
+        },
+        {
+          "name": "004__section__id-sbs-1206.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/004__section__id-sbs-1206.png",
+          "tag": "section",
+          "id": "sbs-1206"
+        },
+        {
+          "name": "005__section__id-sbs-r.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/005__section__id-sbs-r.png",
+          "tag": "section",
+          "id": "sbs-r"
+        },
+        {
+          "name": "006__section__id-reviews.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/006__section__id-reviews.png",
+          "tag": "section",
+          "id": "reviews"
+        },
+        {
+          "name": "007__section__id-cta.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/007__section__id-cta.png",
+          "tag": "section",
+          "id": "cta"
+        },
+        {
+          "name": "008__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/008__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "009__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/009__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "010__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/home/010__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/emergency-repairs",
+      "pageSlug": "emergency-repairs",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/__fullpage.png",
+      "sectionCount": 8,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-int-hero.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/002__section__id-int-hero.png",
+          "tag": "section",
+          "id": "int-hero"
+        },
+        {
+          "name": "003__section__id-content-page-1402.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/003__section__id-content-page-1402.png",
+          "tag": "section",
+          "id": "content-page-1402"
+        },
+        {
+          "name": "004__section__id-services-563.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/004__section__id-services-563.png",
+          "tag": "section",
+          "id": "services-563"
+        },
+        {
+          "name": "005__section__id-faq-254.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/005__section__id-faq-254.png",
+          "tag": "section",
+          "id": "faq-254"
+        },
+        {
+          "name": "006__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/006__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "007__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/007__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "008__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/emergency-repairs/008__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/drain-cleaning",
+      "pageSlug": "drain-cleaning",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/__fullpage.png",
+      "sectionCount": 8,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-int-hero.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/002__section__id-int-hero.png",
+          "tag": "section",
+          "id": "int-hero"
+        },
+        {
+          "name": "003__section__id-content-page-1402.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/003__section__id-content-page-1402.png",
+          "tag": "section",
+          "id": "content-page-1402"
+        },
+        {
+          "name": "004__section__id-services-563.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/004__section__id-services-563.png",
+          "tag": "section",
+          "id": "services-563"
+        },
+        {
+          "name": "005__section__id-faq-254.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/005__section__id-faq-254.png",
+          "tag": "section",
+          "id": "faq-254"
+        },
+        {
+          "name": "006__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/006__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "007__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/007__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "008__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/drain-cleaning/008__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/water-heater-installation",
+      "pageSlug": "water-heater-installation",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/__fullpage.png",
+      "sectionCount": 8,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-int-hero.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/002__section__id-int-hero.png",
+          "tag": "section",
+          "id": "int-hero"
+        },
+        {
+          "name": "003__section__id-content-page-1402.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/003__section__id-content-page-1402.png",
+          "tag": "section",
+          "id": "content-page-1402"
+        },
+        {
+          "name": "004__section__id-services-563.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/004__section__id-services-563.png",
+          "tag": "section",
+          "id": "services-563"
+        },
+        {
+          "name": "005__section__id-faq-254.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/005__section__id-faq-254.png",
+          "tag": "section",
+          "id": "faq-254"
+        },
+        {
+          "name": "006__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/006__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "007__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/007__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "008__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/water-heater-installation/008__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/leak-detection",
+      "pageSlug": "leak-detection",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/__fullpage.png",
+      "sectionCount": 8,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-int-hero.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/002__section__id-int-hero.png",
+          "tag": "section",
+          "id": "int-hero"
+        },
+        {
+          "name": "003__section__id-content-page-1402.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/003__section__id-content-page-1402.png",
+          "tag": "section",
+          "id": "content-page-1402"
+        },
+        {
+          "name": "004__section__id-services-563.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/004__section__id-services-563.png",
+          "tag": "section",
+          "id": "services-563"
+        },
+        {
+          "name": "005__section__id-faq-254.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/005__section__id-faq-254.png",
+          "tag": "section",
+          "id": "faq-254"
+        },
+        {
+          "name": "006__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/006__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "007__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/007__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "008__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/leak-detection/008__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/about",
+      "pageSlug": "about",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/about/__fullpage.png",
+      "sectionCount": 7,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/about/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-int-hero.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/about/002__section__id-int-hero.png",
+          "tag": "section",
+          "id": "int-hero"
+        },
+        {
+          "name": "003__section__id-sbs.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/about/003__section__id-sbs.png",
+          "tag": "section",
+          "id": "sbs"
+        },
+        {
+          "name": "004__section__id-cta.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/about/004__section__id-cta.png",
+          "tag": "section",
+          "id": "cta"
+        },
+        {
+          "name": "005__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/about/005__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "006__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/about/006__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "007__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/about/007__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/contact",
+      "pageSlug": "contact",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/contact/__fullpage.png",
+      "sectionCount": 7,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/contact/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-int-hero.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/contact/002__section__id-int-hero.png",
+          "tag": "section",
+          "id": "int-hero"
+        },
+        {
+          "name": "003__section__id-cs-contact-242.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/contact/003__section__id-cs-contact-242.png",
+          "tag": "section",
+          "id": "cs-contact-242"
+        },
+        {
+          "name": "004__div__cls-cs-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/contact/004__div__cls-cs-right-section.png",
+          "tag": "div",
+          "className": "cs-right-section"
+        },
+        {
+          "name": "005__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/contact/005__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "006__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/contact/006__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "007__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/contact/007__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    },
+    {
+      "url": "http://localhost:8081/services",
+      "pageSlug": "services",
+      "fullPage": "public/screenshots/demo-apex-plumbingss/after_400/services/__fullpage.png",
+      "sectionCount": 5,
+      "sections": [
+        {
+          "name": "001__main__id-main.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/services/001__main__id-main.png",
+          "tag": "main",
+          "id": "main"
+        },
+        {
+          "name": "002__section__id-content-page-1402.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/services/002__section__id-content-page-1402.png",
+          "tag": "section",
+          "id": "content-page-1402"
+        },
+        {
+          "name": "003__footer__id-footer.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/services/003__footer__id-footer.png",
+          "tag": "footer",
+          "id": "footer"
+        },
+        {
+          "name": "004__div__cls-left-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/services/004__div__cls-left-section.png",
+          "tag": "div",
+          "className": "left-section"
+        },
+        {
+          "name": "005__div__cls-right-section.png",
+          "path": "public/screenshots/demo-apex-plumbingss/after_400/services/005__div__cls-right-section.png",
+          "tag": "div",
+          "className": "right-section"
+        }
+      ]
+    }
+  ]
+}

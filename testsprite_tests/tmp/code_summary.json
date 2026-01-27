@@ -1,0 +1,40 @@
+{
+  "tech_stack": ["TypeScript", "Node.js", "Express", "Axios", "Playwright", "Git"],
+  "features": [
+    {
+      "name": "Webhook Processing",
+      "description": "Processes incoming ClickUp webhook events and triggers relevant workflows.",
+      "files": ["src/clickup/webhookHandler.ts", "src/clickup/apiClient.ts"]
+    },
+    {
+      "name": "Workflow Orchestration",
+      "description": "Manages the full lifecycle of a task from import to completion, including agent triggering and approval.",
+      "files": ["src/workflow/workflowOrchestrator.ts", "src/state/stateManager.ts"]
+    },
+    {
+      "name": "Demo Creation",
+      "description": "Automates the creation of demo websites by cloning templates and applying branding.",
+      "files": ["src/handlers/demoHandler.ts", "src/git/githubCloner.ts", "src/git/repoManager.ts"]
+    },
+    {
+      "name": "Cursor Agent Integration",
+      "description": "Interfaces with Cursor IDE's agent to perform automated code changes.",
+      "files": ["src/cursor/workspaceManager.ts", "src/cursor/agentQueue.ts", "src/cursor/taskStatusManager.ts"]
+    },
+    {
+      "name": "Approval Workflow",
+      "description": "Handles human-in-the-loop approvals via email or Slack tokens.",
+      "files": ["src/approval/approvalManager.ts", "src/approval/emailService.ts", "src/approval/slackService.ts"]
+    },
+    {
+      "name": "Reporting & Monitoring",
+      "description": "Provides uptime monitoring and generates performance/status reports.",
+      "files": ["src/reports/reportRunner.ts", "src/uptime/uptimeMonitor.ts", "src/routes/reportRoutes.ts"]
+    },
+    {
+      "name": "Task Import",
+      "description": "Imports tasks and assets from ClickUp into the local workflow system.",
+      "files": ["src/handlers/taskImportHandler.ts", "src/clickup/fetchAttachments.ts"]
+    }
+  ]
+}

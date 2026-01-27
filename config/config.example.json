@@ -1,5 +1,8 @@
 {
   "clickup": {
+    "clientId": "env:CLICKUP_CLIENT_ID",
+    "clientSecret": "env:CLICKUP_CLIENT_SECRET",
+    "redirectUri": "env:CLICKUP_REDIRECT_URI",
     "apiToken": "env:CLICKUP_API_TOKEN",
     "webhookSecret": "env:CLICKUP_WEBHOOK_SECRET",
     "triggerStatus": "Ready to Code",
@@ -12,14 +15,35 @@
   "git": {
     "clientWebsitesDir": "./client-websites",
     "githubToken": "env:GITHUB_TOKEN",
+    "githubOrg": "",
     "defaultBranch": "main",
-    "folderMapping": {}
+    "devBranch": "main",
+    "folderMapping": {},
+    "userName": "KWD Dev Bot",
+    "userEmail": "bot@kwd.dev",
+    "useSSH": false
   },
   "cursor": {
     "cliPath": "cursor",
     "autoOpen": true,
     "agentMode": true,
-    "agentTriggerMethod": "api"
+    "agentTriggerMethod": "api",
+    "triggerMode": "queue",
+    "timeoutMs": 3600000,
+    "useWsl": false,
+    "wslDistribution": "Ubuntu",
+    "queue": {
+      "ttlMinutes": 120,
+      "maxTasksPerWorkspace": 10
+    },
+    "defaultModel": "claude-sonnet-4-20250514",
+    "availableModels": ["claude-sonnet-4-20250514", "gpt-4.1", "gemini-2.5-pro", "claude-3.5-sonnet", "gpt-4-turbo", "gpt-4o"]
+  },
+  "screenshots": {
+    "fullSiteCapture": true,
+    "maxPages": 20,
+    "captureSections": true,
+    "maxIterationsToKeep": 3
   },
   "testing": {
     "timeout": 300000
@@ -40,11 +64,22 @@
         }
       },
       "from": "env:EMAIL_FROM",
-      "approvalUrl": "http://localhost:3000/approve/{token}"
+      "approvalUrl": "env:APPROVAL_BASE_URL"
     },
     "slack": {
       "webhookUrl": "env:SLACK_WEBHOOK_URL"
-    }
+    },
+    "enableEmailNotifications": true
+  },
+  "auth": {
+    "sessionDuration": 3
+  },
+  "netlify": {
+    "apiToken": "env:NETLIFY_API_TOKEN",
+    "accountSlug": "env:NETLIFY_ACCOUNT_SLUG",
+    "buildCommand": "",
+    "publishDir": "public",
+    "oauthConfigured": false
   }
 }
 

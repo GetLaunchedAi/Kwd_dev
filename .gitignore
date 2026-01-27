@@ -1,18 +1,47 @@
+# Dependencies
 node_modules/
 dist/
+
+# Environment & Credentials
 .env
-*.log
+.env.*
+credentials-*.json
+config/config.json
+config/config.production.json
+config/*-cache.json
+tokens/
+
+# OS & Editor
 .DS_Store
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# Runtime directories
 workspaces/
-config/config.json
-tokens/
+logs/
+state/
+downloads/
+temp-uploads/
+backups/
 
+# Cursor Agent Queue & Artifacts
+.cursor/queue/
+.cursor/running/
+.cursor/done/
+.cursor/failed/
+.cursor/status/
+.cursor/artifacts/
 
+# Runtime files
+*.log
+*.ndjson
+NGROK_URL.txt
+ecosystem.config.js
 
-
-
-
+# Test outputs
+test-results-*.csv
+test-results/
+playwright-report/
+coverage/

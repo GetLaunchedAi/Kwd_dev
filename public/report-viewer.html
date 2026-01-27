@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Report Viewer | KWD Dev</title>
+    <link rel="stylesheet" href="/styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .report-layout {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .report-header {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .report-meta {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+        .report-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            min-height: 600px;
+            position: relative;
+        }
+        .report-iframe {
+            width: 100%;
+            height: 1200px;
+            border: none;
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-card);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        .security-report {
+            padding: 2rem;
+        }
+        .security-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        .security-card {
+            background: var(--bg-main);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .security-card h3 {
+            margin-top: 0;
+            font-size: 1rem;
+            color: var(--text-muted);
+        }
+        .security-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin: 0.5rem 0;
+        }
+        .severity-high { color: var(--danger-color); }
+        .severity-medium { color: var(--warning-color); }
+        .severity-low { color: var(--success-color); }
+        
+        .error-container {
+            text-align: center;
+            padding: 4rem 2rem;
+        }
+        .error-icon {
+            font-size: 4rem;
+            color: var(--danger-color);
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body class="light-theme">
+    <div class="report-layout">
+        <header class="report-header">
+            <div>
+                <h1 id="reportTitle">Loading Report...</h1>
+                <div id="reportMeta" class="report-meta"></div>
+            </div>
+            <div class="logo">
+                <span class="logo-icon">🚀</span>
+                <span class="logo-text">KWD Dev</span>
+            </div>
+        </header>
+
+        <main class="report-content" id="reportContent">
+            <div id="loading" class="loading-overlay">
+                <div class="spinner"></div>
+                <p>Retrieving report artifacts...</p>
+            </div>
+            
+            <div id="error" class="error-container hidden">
+                <div class="error-icon">
+                    <i data-lucide="alert-triangle"></i>
+                </div>
+                <h2 id="errorTitle">Report Not Found</h2>
+                <p id="errorMessage">This share link may have expired or the report was deleted.</p>
+            </div>
+
+            <!-- Content will be injected here -->
+        </main>
+
+        <footer style="margin-top: 2rem; text-align: center; color: var(--text-muted); font-size: 0.8rem;">
+            &copy; 2026 KWD Dev - Site Reporting System
+        </footer>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="/report-viewer.js"></script>
+</body>
+</html>
+
+
+
+

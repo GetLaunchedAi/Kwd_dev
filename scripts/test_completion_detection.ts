@@ -15,10 +15,11 @@ async function testCompletionDetection() {
   await fs.writeFile(path.join(testDir, 'README.md'), '# Test Repo');
   await git.add('.');
   await git.commit('Initial commit');
-  await git.branch(['-M', 'master']);
+  const targetBranch = config.git.defaultBranch || 'main';
+  await git.branch(['-M', targetBranch]);
 
   const taskId = 'test-task-123';
-  const branchName = 'master';
+  const branchName = targetBranch;
 
   // Configure detection
   config.cursor.agentCompletionDetection = {

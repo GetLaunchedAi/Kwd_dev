@@ -1,4 +1,6 @@
+import * as path from 'path';
 import { logger } from './logger';
+import { config } from '../config/config';
 import { findTaskById } from './taskScanner';
 import { extractClientName } from './taskParser';
 import { findClientFolder } from '../git/repoManager';
@@ -96,17 +98,19 @@ export async function validateTaskImport(input: TaskImportInput): Promise<Valida
     const clientFolderInfo = await findClientFolder(clientName);
     let clientFolder: string;
     
-    if (!clientFolderInfo || !clientFolderInfo.isValid) {
+    if (!clientFolderInfo) {
       // Client folder doesn't exist yet - that's okay, we'll create it or use a placeholder
       logger.warn(`Client folder not found for "${clientName}" - will be created during workflow`);
       warnings.push(`Client folder "${clientName}" does not exist yet and will be created during workflow`);
       
       // Use the expected path even if it doesn't exist yet
-      const githubCloneAllDir = require('../config/config').config.git.githubCloneAllDir;
-      const path = require('path');
-      clientFolder = path.join(githubCloneAllDir, 'client-websites', clientName);
+      const githubCloneAllDir = path.resolve(config.git.githubCloneAllDir || '');
+      clientFolder = path.join(githubCloneAllDir, clientName);
     } else {
       clientFolder = clientFolderInfo.path;
+      if (!clientFolderInfo.isValid) {
+        warnings.push(`Client folder "${clientName}" exists but is not yet a Git repository. It will be initialized during workflow.`);
+      }
     }
 
     // Step 4: All validations passed

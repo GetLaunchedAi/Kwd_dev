@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Troubleshooting - KWD Dev</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+                <div id="connectionStatus" class="connection-status">
+                    <span class="status-indicator status-offline" id="statusIndicator"></span>
+                    <span id="statusText">Offline</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item active">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-title">
+                    <h1>Troubleshooting</h1>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div class="mb-lg">
+                    <p class="text-secondary">Common issues and solutions when running the KWD Dev dashboard on localhost.</p>
+                </div>
+
+                <div class="tasks-grid">
+                    <!-- Package Installation -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="flex align-center gap-sm">
+                                <i data-lucide="package"></i>
+                                Package Installation
+                            </h3>
+                        </div>
+                        <div class="p-lg">
+                            <p class="mb-md">If you see "module not found" or build errors, ensure all dependencies are installed.</p>
+                            <div class="meta-card mb-md">
+                                <div class="meta-label">Install Dependencies</div>
+                                <div class="branch-value">
+                                    <code>npm install</code>
+                                </div>
+                            </div>
+                            <div class="meta-card">
+                                <div class="meta-label">Rebuild Project</div>
+                                <div class="branch-value">
+                                    <code>npm run build</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Git Configuration -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="flex align-center gap-sm">
+                                <i data-lucide="git-branch"></i>
+                                Git & Branches
+                            </h3>
+                        </div>
+                        <div class="p-lg">
+                            <p class="mb-md">Ensure your local branch is up to date and git is properly configured.</p>
+                            
+                            <div class="meta-card mb-md">
+                                <div class="meta-label">Git Identity Setup</div>
+                                <p class="text-hint mt-sm">Required for making commits</p>
+                                <div class="branch-value mt-sm">
+                                    <code>git config --global user.name "Your Name"</code>
+                                </div>
+                                <div class="branch-value mt-xs">
+                                    <code>git config --global user.email "your@email.com"</code>
+                                </div>
+                            </div>
+
+                            <div class="meta-card mb-md">
+                                <div class="meta-label">Standard Commit Process</div>
+                                <div class="branch-value mt-sm">
+                                    <code>git add .</code>
+                                </div>
+                                <div class="branch-value mt-xs">
+                                    <code>git commit -m "Your message"</code>
+                                </div>
+                                <div class="branch-value mt-xs">
+                                    <code>git push origin branch-name</code>
+                                </div>
+                            </div>
+
+                            <div class="meta-card mb-md">
+                                <div class="meta-label">Sync with Remote</div>
+                                <div class="branch-value">
+                                    <code>git pull origin main</code>
+                                </div>
+                            </div>
+                            
+                            <div class="meta-card">
+                                <div class="meta-label">Check Git Status</div>
+                                <div class="branch-value">
+                                    <code>git status</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Connection Issues -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="flex align-center gap-sm">
+                                <i data-lucide="wifi"></i>
+                                Connection & Webhooks
+                            </h3>
+                        </div>
+                        <div class="p-lg">
+                            <p class="mb-md">Webhook issues usually stem from ngrok or port conflicts.</p>
+                            <div class="meta-card mb-md">
+                                <div class="meta-label">Check ngrok Status</div>
+                                <p class="text-hint mt-sm">Ensure ngrok is running on port 3000</p>
+                                <div class="branch-value mt-sm">
+                                    <code>npx ngrok http 3000</code>
+                                </div>
+                            </div>
+                            <div class="meta-card">
+                                <div class="meta-label">Check Server Port</div>
+                                <p class="text-hint mt-sm">Default port is 3000. Check if another process is using it.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Environment Setup -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="flex align-center gap-sm">
+                                <i data-lucide="key"></i>
+                                Environment Setup
+                            </h3>
+                        </div>
+                        <div class="p-lg">
+                            <p class="mb-md">Missing or incorrect API keys will cause failures.</p>
+                            <div class="meta-card mb-md">
+                                <div class="meta-label">Check .env File</div>
+                                <p class="text-hint mt-sm">Verify CLICKUP_API_TOKEN and GITHUB_TOKEN are set.</p>
+                            </div>
+                            <div class="meta-card">
+                                <div class="meta-label">Verify config.json</div>
+                                <p class="text-hint mt-sm">Ensure task-client-mappings.json has valid paths.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- App Session State -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="flex align-center gap-sm">
+                                <i data-lucide="refresh-cw"></i>
+                                UI Session State
+                            </h3>
+                        </div>
+                        <div class="p-lg">
+                            <p class="mb-md">If the "Create Demo" page is stuck resuming an old build, clear the local session.</p>
+                            <div class="meta-card">
+                                <div class="meta-label">Reset Active Demo Session</div>
+                                <p class="text-hint mt-sm">This clears the "Resuming progress" state in your browser.</p>
+                                <button id="resetSessionBtn" class="btn btn-danger btn-sm mt-md w-full">
+                                    <i data-lucide="trash-2"></i>
+                                    <span>Clear Local Progress State</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Common Solutions Section -->
+                <section class="all-tasks-section">
+                    <div class="section-header">
+                        <h2>Common Error Messages</h2>
+                        <div class="section-divider"></div>
+                    </div>
+
+                    <div class="client-group">
+                        <div class="client-group-header">
+                            <div class="client-name">
+                                <i data-lucide="alert-triangle" class="text-warning"></i>
+                                <span>"EADDRINUSE: address already in use :::3000"</span>
+                            </div>
+                        </div>
+                        <div class="p-lg">
+                            <p>Another application is already using port 3000. You can either stop that application or change the port in your <code>.env</code> file by adding <code>PORT=3001</code>.</p>
+                        </div>
+                    </div>
+
+                    <div class="client-group">
+                        <div class="client-group-header">
+                            <div class="client-name">
+                                <i data-lucide="alert-triangle" class="text-warning"></i>
+                                <span>"Unauthorized" or "Invalid API Token"</span>
+                            </div>
+                        </div>
+                        <div class="p-lg">
+                            <p>Your ClickUp API token has expired or is incorrect. Go to ClickUp Settings > Apps and regenerate your Personal API Token, then update it in your <code>.env</code> file.</p>
+                        </div>
+                    </div>
+
+                    <div class="client-group">
+                        <div class="client-group-header">
+                            <div class="client-name">
+                                <i data-lucide="alert-triangle" class="text-warning"></i>
+                                <span>"Branch not found"</span>
+                            </div>
+                        </div>
+                        <div class="p-lg">
+                            <p>The branch associated with the task does not exist locally. Try running <code>git fetch --all</code> to ensure all remote branches are visible.</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="troubleshooting.js"></script>
+</body>
+</html>
+

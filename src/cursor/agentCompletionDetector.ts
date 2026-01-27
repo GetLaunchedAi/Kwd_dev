@@ -3,34 +3,17 @@ import * as path from 'path';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
 import { 
-  getCurrentCommitHash, 
-  getBaselineState, 
-  hasUncommittedChanges,
-  GitBaselineState 
-} from '../git/repoManager';
-import { 
-  saveTaskState, 
   loadTaskState,
-  TaskState,
+  saveTaskState,
   WorkflowState 
 } from '../state/stateManager';
-
-/**
- * Tracks stability state for git status checking
- */
-interface StabilityTracker {
-  lastChangeTime: number | null;
-  lastStatus: boolean;
-}
 
 /**
  * Polling state for a single task
  */
 interface PollingState {
-  baselineState: GitBaselineState;
   startTime: number;
   lastCheckTime: number;
-  stabilityTracker: StabilityTracker;
   cancelled: boolean;
 }
 
@@ -38,125 +21,162 @@ interface PollingState {
 const activePolling = new Map<string, PollingState>();
 
 /**
- * Checks if git commits have changed from baseline
+ * CRITICAL: Process the next task in the queue after one completes.
+ * This is the missing link that enables sequential queue processing.
+ * 
+ * @param depth - Internal recursion depth counter to prevent infinite loops
  */
-async function checkGitCommits(
-  clientFolder: string,
-  baselineState: GitBaselineState
-): Promise<boolean> {
-  try {
-    const currentCommitHash = await getCurrentCommitHash(clientFolder);
-    
-    // If baseline had no commits, any commit means completion
-    if (!baselineState.commitHash && currentCommitHash) {
-      logger.debug(`Git commit detected: new commit ${currentCommitHash} (baseline had no commits)`);
-      return true;
-    }
-    
-    // If both exist and are different, completion detected
-    if (baselineState.commitHash && currentCommitHash && 
-        baselineState.commitHash !== currentCommitHash) {
-      logger.debug(`Git commit detected: changed from ${baselineState.commitHash} to ${currentCommitHash}`);
-      return true;
-    }
-    
-    return false;
-  } catch (error: any) {
-    logger.error(`Error checking git commits: ${error.message}`);
-    return false;
+export async function processNextQueuedTask(depth: number = 0): Promise<void> {
+  // Safeguard against infinite recursion (max 5 consecutive failed tasks)
+  const MAX_RECURSION_DEPTH = 5;
+  if (depth >= MAX_RECURSION_DEPTH) {
+    logger.error(`processNextQueuedTask: Max recursion depth (${MAX_RECURSION_DEPTH}) reached. Stopping to prevent infinite loop.`);
+    return;
   }
-}
 
-/**
- * Checks if CURSOR_TASK.md file has been deleted or renamed
- */
-async function checkTaskFileStatus(clientFolder: string): Promise<boolean> {
   try {
-    const taskFilePath = path.join(clientFolder, 'CURSOR_TASK.md');
-    const exists = await fs.pathExists(taskFilePath);
+    const { agentQueue } = await import('./agentQueue');
     
-    if (!exists) {
-      logger.debug(`Task file deleted: CURSOR_TASK.md no longer exists`);
-      return true;
+    // Check if there are tasks waiting in queue
+    const overview = await agentQueue.getQueueOverview();
+    
+    if (overview.queued.length === 0) {
+      logger.info('Queue is empty - no more tasks to process');
+      return;
     }
     
-    return false;
-  } catch (error: any) {
-    logger.error(`Error checking task file status: ${error.message}`);
-    return false;
-  }
-}
-
-/**
- * Checks for completion marker file
- */
-async function checkCompletionMarker(
-  clientFolder: string,
-  markerFile?: string
-): Promise<boolean> {
-  if (!markerFile) {
-    return false;
-  }
-  
-  try {
-    const markerPath = path.join(clientFolder, markerFile);
-    const exists = await fs.pathExists(markerPath);
-    
-    if (exists) {
-      logger.debug(`Completion marker found: ${markerFile}`);
-      return true;
+    if (overview.running.length > 0) {
+      logger.info(`Another task is already running (${overview.running[0].taskId}) - queue will process naturally`);
+      return;
     }
     
-    return false;
-  } catch (error: any) {
-    logger.error(`Error checking completion marker: ${error.message}`);
-    return false;
-  }
-}
-
-/**
- * Monitors git status for uncommitted changes that stabilize
- * Returns true if changes exist but haven't changed for stabilityPeriod
- */
-async function checkGitStatusStability(
-  clientFolder: string,
-  stabilityPeriod: number,
-  tracker: StabilityTracker
-): Promise<boolean> {
-  try {
-    const hasChanges = await hasUncommittedChanges(clientFolder);
-    const now = Date.now();
+    logger.info(`Found ${overview.queued.length} task(s) waiting in queue. Claiming next task...`);
     
-    // If there are changes now
-    if (hasChanges) {
-      // If this is the first time we see changes, record the time
-      if (!tracker.lastChangeTime) {
-        tracker.lastChangeTime = now;
-        tracker.lastStatus = hasChanges;
-        logger.debug(`Uncommitted changes detected, starting stability timer`);
-        return false;
+    // Claim the next task
+    const claimed = await agentQueue.claimNextTask();
+    
+    if (!claimed) {
+      logger.warn('Failed to claim next task from queue despite tasks being available');
+      return;
+    }
+    
+    logger.info(`Claimed task ${claimed.metadata.taskId} from queue. Starting agent...`);
+    
+    // Trigger the agent for this task
+    const { triggerAgent } = await import('./agentTrigger');
+    const promptPath = path.join(claimed.metadata.clientFolder, 'CURSOR_TASK.md');
+    
+    // We need to get the task info from the task state
+    const { loadTaskInfo } = await import('../state/stateManager');
+    const taskInfo = await loadTaskInfo(claimed.metadata.clientFolder, claimed.metadata.taskId);
+    
+    if (!taskInfo?.task) {
+      logger.error(`Cannot find task info for claimed task ${claimed.metadata.taskId}. Moving to failed.`);
+      await agentQueue.completeTask(false, 'Task info not found during queue processing', claimed.metadata.taskId);
+      // Try to process the next one with incremented depth
+      await processNextQueuedTask(depth + 1);
+      return;
+    }
+    
+    // Apply any pending agent feedback before triggering
+    try {
+      const { applyPendingAgentFeedback } = await import('./workspaceManager');
+      const appliedIds = await applyPendingAgentFeedback(claimed.metadata.clientFolder, claimed.metadata.taskId);
+      if (appliedIds.length > 0) {
+        logger.info(`Applied ${appliedIds.length} pending feedback item(s) for task ${claimed.metadata.taskId}`);
       }
+    } catch (feedbackErr: any) {
+      logger.warn(`Could not apply pending feedback for task ${claimed.metadata.taskId}: ${feedbackErr.message}`);
+      // Continue even if feedback application fails
+    }
+    
+    // Trigger the agent
+    await triggerAgent(claimed.metadata.clientFolder, promptPath, taskInfo.task);
+    
+    // Start completion detection for this task
+    if (config.cursor.agentCompletionDetection?.enabled) {
+      await startCompletionDetection(
+        claimed.metadata.clientFolder, 
+        claimed.metadata.taskId, 
+        claimed.metadata.branch || 'main'
+      );
+    }
+    
+    logger.info(`Successfully started processing queued task ${claimed.metadata.taskId}`);
+    
+  } catch (error: any) {
+    logger.error(`Error processing next queued task: ${error.message}`);
+    // Don't throw - we don't want to break the completion flow of the previous task
+  }
+}
+
+/**
+ * Checks the authoritative status file: workspaceRoot/.cursor/status/${taskId}.json
+ * This is the single source of truth written by taskStatusManager.
+ */
+async function checkStatusFile(clientFolder: string, taskId: string): Promise<{ isComplete: boolean; success: boolean; error?: string }> {
+  try {
+    // Single authoritative path: client folder status file
+    const statusPath = path.join(clientFolder, '.cursor', 'status', 'current.json');
+    
+    // If file doesn't exist yet, task is still starting/running
+    if (!(await fs.pathExists(statusPath))) {
+      logger.debug(`Status file not found yet for task ${taskId}: ${statusPath}`);
+      return { isComplete: false, success: false };
+    }
+
+    const status = await fs.readJson(statusPath);
+    logger.debug(`Status file content for task ${taskId}:`, status);
+    
+    // VERIFICATION: Ensure this status file belongs to the CURRENT task ID we are polling for.
+    // Check both root-level taskId AND nested task.taskId (for step-based workflows).
+    // The nested task.taskId contains the full step suffix (e.g., "demo-sunny-side-baker-step4")
+    // while root taskId may only have the base ID (e.g., "demo-sunny-side-baker").
+    const statusTaskId = status.task?.taskId || status.taskId;
+    if (statusTaskId !== taskId) {
+      logger.debug(`Status file taskId (${statusTaskId}) does not match current taskId (${taskId}). Treating as not yet started.`);
+      return { isComplete: false, success: false };
+    }
+
+    // Check for stale heartbeat (agent hung/crashed without updating status)
+    if (status.lastHeartbeat && (status.state === 'RUNNING' || status.state === 'running')) {
+      const heartbeatAge = Date.now() - new Date(status.lastHeartbeat).getTime();
       
-      // If changes have been stable for the required period
-      if (tracker.lastChangeTime && (now - tracker.lastChangeTime) >= stabilityPeriod) {
-        logger.debug(`Git status stable: uncommitted changes present for ${stabilityPeriod}ms`);
-        return true;
-      }
+      // Multi-step demo tasks get a longer heartbeat allowance (10 minutes as per plan)
+      const isDemoTask = taskId.startsWith('demo-');
+      const maxHeartbeatAge = isDemoTask ? 600000 : 120000; // 10 mins for demo, 2 mins for normal
       
-      tracker.lastStatus = hasChanges;
-      return false;
-    } else {
-      // No changes now - reset tracker if we had changes before
-      if (tracker.lastStatus) {
-        logger.debug(`Uncommitted changes cleared`);
+      if (heartbeatAge > maxHeartbeatAge) {
+        logger.warn(`Task ${taskId} has stale heartbeat (${Math.round(heartbeatAge / 1000)}s old). Max age is ${Math.round(maxHeartbeatAge / 1000)}s.`);
+        
+        // Log where to find logs
+        const logsDir = path.join(clientFolder, 'logs', 'tasks', taskId);
+        logger.warn(`Checking logs for clues in: ${logsDir}`);
+        return { 
+          isComplete: true, 
+          success: false, 
+          error: `Agent process appears to be hung (no heartbeat for ${Math.round(heartbeatAge / 1000)} seconds). Check logs at ${logsDir}` 
+        };
       }
-      tracker.lastChangeTime = null;
-      tracker.lastStatus = false;
-      return false;
     }
+
+    // Check completion states
+    if (status.state === 'done' || status.state === 'DONE' || status.state === 'completed' || status.state === 'COMPLETED') {
+      logger.info(`Task ${taskId} completion detected: state=${status.state} in ${statusPath}`);
+      return { isComplete: true, success: true };
+    } else if (status.state === 'failed' || status.state === 'FAILED') {
+      logger.info(`Task ${taskId} failure detected: state=${status.state} in ${statusPath}`);
+      return { isComplete: true, success: false, error: status.errors?.[0] || status.error || 'Unknown error from agent' };
+    }
+
+    // Task is still running
+    logger.debug(`Task ${taskId} still running: state=${status.state}, step=${status.step || 'unknown'}`);
+    return { isComplete: false, success: false };
+    
   } catch (error: any) {
-    logger.error(`Error checking git status stability: ${error.message}`);
-    return false;
+    // Log parse errors but continue polling - might be in middle of atomic write
+    logger.debug(`Error reading status file for task ${taskId}: ${error.message}`);
+    return { isComplete: false, success: false };
   }
 }
 
@@ -165,49 +185,39 @@ async function checkGitStatusStability(
  */
 async function detectAgentCompletion(
   clientFolder: string,
-  taskId: string,
-  baselineState: GitBaselineState
-): Promise<boolean> {
+  taskId: string
+): Promise<{ isComplete: boolean; success: boolean; error?: string }> {
   const detectionConfig = config.cursor.agentCompletionDetection;
   
   if (!detectionConfig || !detectionConfig.enabled) {
     logger.warn('Agent completion detection is disabled');
-    return false;
+    return { isComplete: false, success: false };
   }
   
   logger.debug(`Checking agent completion for task ${taskId}`);
-  
-  // Check git commits if enabled
-  if (detectionConfig.checkGitCommits) {
-    const commitsChanged = await checkGitCommits(clientFolder, baselineState);
-    if (commitsChanged) {
-      logger.info(`Agent completion detected via git commits for task ${taskId}`);
-      return true;
-    }
+
+  // 1. Check process exit (if available) - this is a direct signal
+  const currentProcess = (global as any).currentAgentProcess;
+  if (currentProcess && currentProcess.exitCode !== null) {
+    logger.info(`Agent process exited with code ${currentProcess.exitCode}`);
+    
+    // Check status file one last time to see if it was updated right before exit
+    const status = await checkStatusFile(clientFolder, taskId);
+    return { 
+      isComplete: true, 
+      success: status.isComplete ? status.success : (currentProcess.exitCode === 0),
+      error: status.error
+    };
+  }
+
+  // 2. Check authoritative status file (the primary signal)
+  const status = await checkStatusFile(clientFolder, taskId);
+  if (status.isComplete) {
+    logger.info(`Agent completion detected via status file for task ${taskId} (success: ${status.success})`);
+    return status;
   }
   
-  // Check task file deletion if enabled
-  if (detectionConfig.checkTaskFileDeletion) {
-    const taskFileDeleted = await checkTaskFileStatus(clientFolder);
-    if (taskFileDeleted) {
-      logger.info(`Agent completion detected via task file deletion for task ${taskId}`);
-      return true;
-    }
-  }
-  
-  // Check completion marker if configured
-  if (detectionConfig.completionMarkerFile) {
-    const markerExists = await checkCompletionMarker(
-      clientFolder,
-      detectionConfig.completionMarkerFile
-    );
-    if (markerExists) {
-      logger.info(`Agent completion detected via completion marker for task ${taskId}`);
-      return true;
-    }
-  }
-  
-  return false;
+  return { isComplete: false, success: false };
 }
 
 /**
@@ -216,7 +226,7 @@ async function detectAgentCompletion(
 export async function startCompletionDetection(
   clientFolder: string,
   taskId: string,
-  branchName: string
+  _branchName: string // Kept for compatibility, but no longer used for git checks
 ): Promise<void> {
   const detectionConfig = config.cursor.agentCompletionDetection;
   
@@ -225,37 +235,36 @@ export async function startCompletionDetection(
     return;
   }
   
+  // Prevent duplicate polling loops for the same task
+  if (activePolling.has(taskId)) {
+    logger.info(`Completion detection already active for task ${taskId}. Skipping duplicate start.`);
+    return;
+  }
+  
+  // Log the authoritative status file path once
+  const authoritativeStatusPath = path.join(clientFolder, '.cursor', 'status', 'current.json');
   logger.info(`Starting agent completion detection for task ${taskId}`);
+  logger.info(`Authoritative status file: ${authoritativeStatusPath}`);
   
   try {
-    // Capture baseline state
-    const baselineState = await getBaselineState(clientFolder, branchName);
-    
-    // Save baseline state to task state
+    // Update task state that detection has started
     await saveTaskState(clientFolder, taskId, {
       agentCompletion: {
-        baselineCommitHash: baselineState.commitHash || undefined,
-        baselineBranch: baselineState.branchName,
         detectionStartedAt: new Date().toISOString(),
       },
     });
     
     // Initialize polling state
     const pollingState: PollingState = {
-      baselineState,
       startTime: Date.now(),
       lastCheckTime: Date.now(),
-      stabilityTracker: {
-        lastChangeTime: null,
-        lastStatus: false,
-      },
       cancelled: false,
     };
     
     activePolling.set(taskId, pollingState);
     
     // Start polling loop (non-blocking)
-    pollForCompletion(clientFolder, taskId, branchName, pollingState).catch(error => {
+    pollForCompletion(clientFolder, taskId, pollingState).catch(error => {
       logger.error(`Error in completion detection polling for task ${taskId}: ${error.message}`);
       // Update state to error
       updateWorkflowStateOnError(clientFolder, taskId, error);
@@ -268,20 +277,21 @@ export async function startCompletionDetection(
 }
 
 /**
- * Main polling loop
+ * Main polling loop with robust error handling
  */
 async function pollForCompletion(
   clientFolder: string,
   taskId: string,
-  branchName: string,
   pollingState: PollingState
 ): Promise<void> {
   const detectionConfig = config.cursor.agentCompletionDetection!;
   const pollInterval = detectionConfig.pollInterval || 30000;
   const maxWaitTime = detectionConfig.maxWaitTime || 3600000;
-  const stabilityPeriod = detectionConfig.stabilityPeriod || 60000;
   
   logger.info(`Polling started for task ${taskId} (interval: ${pollInterval}ms, max wait: ${maxWaitTime}ms)`);
+  
+  let consecutiveErrors = 0;
+  const maxConsecutiveErrors = 5;
   
   while (!pollingState.cancelled) {
     try {
@@ -295,6 +305,21 @@ async function pollForCompletion(
         return;
       }
       
+      // DEFENSIVE CHECK: Verify task still exists before updating state
+      // This prevents recreating state files for deleted tasks
+      const taskWorkflowDir = path.join(clientFolder, '.clickup-workflow', taskId);
+      if (!(await fs.pathExists(taskWorkflowDir))) {
+        logger.info(`Task ${taskId} workflow directory no longer exists - task was likely deleted. Stopping polling.`);
+        activePolling.delete(taskId);
+        return;
+      }
+      
+      // Check if polling was cancelled during the async directory check (race condition guard)
+      if (pollingState.cancelled) {
+        logger.info(`Polling cancelled for task ${taskId} during iteration`);
+        return;
+      }
+      
       // Update last check time in state
       pollingState.lastCheckTime = now;
       await saveTaskState(clientFolder, taskId, {
@@ -303,39 +328,48 @@ async function pollForCompletion(
         },
       });
       
-      // Check completion via multiple methods
-      const isComplete = await detectAgentCompletion(
+      // Check completion via authoritative signals
+      const result = await detectAgentCompletion(
         clientFolder,
-        taskId,
-        pollingState.baselineState
+        taskId
       );
       
-      // Check git status stability if enabled
-      if (!isComplete && detectionConfig.checkGitCommits) {
-        const isStable = await checkGitStatusStability(
-          clientFolder,
-          stabilityPeriod,
-          pollingState.stabilityTracker
-        );
-        if (isStable) {
-          logger.info(`Agent completion detected via git stability for task ${taskId}`);
-          await handleCompletion(clientFolder, taskId);
-          return;
-        }
-      }
-      
-      if (isComplete) {
-        await handleCompletion(clientFolder, taskId);
+      if (result.isComplete) {
+        await handleCompletion(clientFolder, taskId, result.success, result.error);
         return;
       }
+      
+      // Reset error counter on successful poll
+      consecutiveErrors = 0;
       
       // Wait before next poll
       await sleep(pollInterval);
       
     } catch (error: any) {
-      logger.error(`Error during polling for task ${taskId}: ${error.message}`);
-      // Continue polling despite errors (they might be transient)
-      await sleep(pollInterval);
+      consecutiveErrors++;
+      logger.error(`Error during polling for task ${taskId} (${consecutiveErrors}/${maxConsecutiveErrors} consecutive errors): ${error.message}`);
+      
+      // If we've hit too many consecutive errors, fail the task
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        logger.error(`Task ${taskId} failed after ${maxConsecutiveErrors} consecutive polling errors. Marking as failed.`);
+        
+        try {
+          await updateWorkflowStateOnError(clientFolder, taskId, new Error(`Polling failed after ${maxConsecutiveErrors} consecutive errors: ${error.message}`));
+          
+          // Complete the task in queue as failed
+          const { agentQueue } = await import('./agentQueue');
+          await agentQueue.completeTask(false, `Polling failed: ${error.message}`, taskId);
+        } catch (cleanupError: any) {
+          logger.error(`Failed to clean up after polling errors: ${cleanupError.message}`);
+        }
+        
+        activePolling.delete(taskId);
+        return;
+      }
+      
+      // Continue polling after error (with backoff)
+      const backoff = pollInterval * Math.min(consecutiveErrors, 3); // Increase backoff with errors
+      await sleep(backoff);
     }
   }
   
@@ -347,9 +381,11 @@ async function pollForCompletion(
  */
 async function handleCompletion(
   clientFolder: string,
-  taskId: string
+  taskId: string,
+  success: boolean = true,
+  error?: string
 ): Promise<void> {
-  logger.info(`Agent completion confirmed for task ${taskId}, continuing workflow`);
+  logger.info(`Agent completion confirmed for task ${taskId} (success: ${success}), continuing workflow`);
   
   try {
     // Mark polling as cancelled
@@ -364,18 +400,66 @@ async function handleCompletion(
         completionDetectedAt: new Date().toISOString(),
       },
     });
+
+    
+    // FIX: Clean up the queue by moving task from running/ to done/ or failed/
+    const { agentQueue } = await import('./agentQueue');
+    
+    
+    await agentQueue.completeTask(success, error, taskId);
+    
+    // CRITICAL FIX: After completing a task, try to claim and start the next queued task
+    await processNextQueuedTask();
+
+    if (!success) {
+      
+      const { updateWorkflowState } = await import('../state/stateManager');
+      await updateWorkflowState(clientFolder, taskId, WorkflowState.ERROR, {
+        error: error || 'Agent reported failure or exited with non-zero code',
+      });
+      activePolling.delete(taskId);
+      return;
+    }
+    
     
     // Continue workflow (use dynamic import to avoid circular dependency)
     const { continueWorkflowAfterAgent } = await import('../workflow/workflowOrchestrator');
     await continueWorkflowAfterAgent(clientFolder, taskId);
+    
     
     // Clean up polling state
     activePolling.delete(taskId);
     
   } catch (error: any) {
     logger.error(`Error handling completion for task ${taskId}: ${error.message}`);
-    await updateWorkflowStateOnError(clientFolder, taskId, error);
-    throw error;
+    
+    // Critical: Always clean up queue state even if workflow continuation fails
+    try {
+      const { agentQueue } = await import('./agentQueue');
+      await agentQueue.completeTask(false, `Workflow error: ${error.message}`, taskId);
+    } catch (queueError: any) {
+      logger.error(`Failed to clean up queue after completion error: ${queueError.message}`);
+    }
+    
+    // Update workflow state
+    try {
+      await updateWorkflowStateOnError(clientFolder, taskId, error);
+    } catch (stateError: any) {
+      logger.error(`Failed to update workflow state after completion error: ${stateError.message}`);
+    }
+    
+    // Clean up polling
+    activePolling.delete(taskId);
+    
+    // Still try to process next queued task even on error
+    try {
+      await processNextQueuedTask();
+    } catch (nextTaskError: any) {
+      logger.error(`Failed to process next queued task after error: ${nextTaskError.message}`);
+    }
+    
+    // Don't re-throw - we've already handled the error
+    // Re-throwing can cause unhandled promise rejections
   }
 }
 
@@ -401,8 +485,23 @@ async function handleTimeout(
       timeout: true,
     });
     
+    // CRITICAL: Move task from running to failed so queue can continue
+    try {
+      const { agentQueue } = await import('./agentQueue');
+      await agentQueue.completeTask(false, 'Agent completion detection timed out', taskId);
+    } catch (queueError: any) {
+      logger.error(`Failed to move timed-out task to failed: ${queueError.message}`);
+    }
+    
     // Clean up polling state
     activePolling.delete(taskId);
+    
+    // Try to process next queued task
+    try {
+      await processNextQueuedTask();
+    } catch (nextTaskError: any) {
+      logger.error(`Failed to process next queued task after timeout: ${nextTaskError.message}`);
+    }
     
   } catch (error: any) {
     logger.error(`Error handling timeout for task ${taskId}: ${error.message}`);
@@ -437,6 +536,150 @@ export function cancelCompletionDetection(taskId: string): void {
     logger.info(`Cancelled completion detection for task ${taskId}`);
   }
   activePolling.delete(taskId);
+}
+
+/**
+ * Cancels all active polling loops for a demo and all its steps.
+ * This prevents stale polling loops from triggering duplicate workflow transitions.
+ */
+export function cancelAllDemoPolling(baseTaskId: string): void {
+  const cancelledTasks: string[] = [];
+  
+  for (const [taskId, pollingState] of activePolling.entries()) {
+    // Cancel if it matches the base taskId or any step variant
+    if (taskId === baseTaskId || taskId.startsWith(`${baseTaskId}-step`)) {
+      pollingState.cancelled = true;
+      cancelledTasks.push(taskId);
+      activePolling.delete(taskId);
+    }
+  }
+  
+  if (cancelledTasks.length > 0) {
+    logger.info(`Cancelled ${cancelledTasks.length} stale polling loop(s) for demo ${baseTaskId}: ${cancelledTasks.join(', ')}`);
+  }
+}
+
+/**
+ * Resumes active detections on startup
+ * 
+ * FIX: Added comprehensive validation before resuming polling to prevent:
+ * - Starting polling for tasks whose state files were corrupted/deleted
+ * - Resuming tasks that have been stale for too long
+ * - Starting duplicate polling if task was already handled
+ */
+export async function resumeActiveDetections(): Promise<void> {
+  const detectionConfig = config.cursor.agentCompletionDetection;
+  if (!detectionConfig || !detectionConfig.enabled) {
+    return;
+  }
+
+  const { findAllTasks } = await import('../utils/taskScanner');
+  const tasks = await findAllTasks();
+  
+  const maxStaleAge = detectionConfig.maxWaitTime || 3600000; // Use configured maxWaitTime
+  const now = Date.now();
+  let resumedCount = 0;
+  let skippedCount = 0;
+  
+  for (const task of tasks) {
+    if (task.state === WorkflowState.IN_PROGRESS) {
+      const state = await loadTaskState(task.clientFolder, task.taskId);
+      
+      // FIX: Skip if state file is missing or corrupted
+      if (!state) {
+        logger.warn(`Skipping resume for task ${task.taskId}: state file missing or corrupted`);
+        skippedCount++;
+        continue;
+      }
+      
+      // FIX: Skip if agentCompletion tracking wasn't started
+      if (!state.agentCompletion) {
+        logger.debug(`Skipping resume for task ${task.taskId}: no agentCompletion tracking data`);
+        skippedCount++;
+        continue;
+      }
+      
+      // FIX: Skip if completion was already detected
+      if (state.agentCompletion.completionDetectedAt) {
+        logger.debug(`Skipping resume for task ${task.taskId}: completion already detected`);
+        skippedCount++;
+        continue;
+      }
+      
+      // FIX: Check if the detection is stale (started too long ago)
+      const detectionStartTime = state.agentCompletion.detectionStartedAt 
+        ? new Date(state.agentCompletion.detectionStartedAt).getTime() 
+        : now;
+      const detectionAge = now - detectionStartTime;
+      
+      if (detectionAge > maxStaleAge) {
+        logger.warn(`Skipping resume for task ${task.taskId}: detection started ${Math.round(detectionAge / 1000)}s ago (exceeds ${Math.round(maxStaleAge / 1000)}s max)`);
+        
+        // FIX: Mark the task as timed out rather than leaving it in limbo
+        try {
+          const { updateWorkflowState } = await import('../state/stateManager');
+          await updateWorkflowState(task.clientFolder, task.taskId, WorkflowState.ERROR, {
+            error: `Detection timed out during server restart (was inactive for ${Math.round(detectionAge / 1000)}s)`,
+            timeout: true,
+          });
+          
+          const { agentQueue } = await import('./agentQueue');
+          await agentQueue.completeTask(false, 'Detection timed out during server restart', task.taskId);
+        } catch (err: any) {
+          logger.error(`Failed to mark stale task ${task.taskId} as timed out: ${err.message}`);
+        }
+        
+        skippedCount++;
+        continue;
+      }
+      
+      // FIX: Verify the client folder still exists
+      if (!(await fs.pathExists(task.clientFolder))) {
+        logger.warn(`Skipping resume for task ${task.taskId}: client folder no longer exists at ${task.clientFolder}`);
+        skippedCount++;
+        continue;
+      }
+      
+      // FIX: Skip if already being polled (shouldn't happen but defensive check)
+      if (activePolling.has(task.taskId)) {
+        logger.debug(`Skipping resume for task ${task.taskId}: already being polled`);
+        skippedCount++;
+        continue;
+      }
+      
+      logger.info(`Resuming completion detection for task ${task.taskId} (detection age: ${Math.round(detectionAge / 1000)}s)`);
+      
+      const pollingState: PollingState = {
+        startTime: detectionStartTime,
+        lastCheckTime: Date.now(),
+        cancelled: false,
+      };
+
+      activePolling.set(task.taskId, pollingState);
+      resumedCount++;
+      
+      // Start polling without awaiting, but ensure errors are properly handled
+      pollForCompletion(task.clientFolder, task.taskId, pollingState).catch(async (error) => {
+        logger.error(`Fatal error in completion detection for task ${task.taskId}: ${error.message}`);
+        
+        // Attempt to mark task as failed
+        try {
+          await updateWorkflowStateOnError(task.clientFolder, task.taskId, error);
+          
+          const { agentQueue } = await import('./agentQueue');
+          await agentQueue.completeTask(false, `Detection error: ${error.message}`, task.taskId);
+        } catch (cleanupError: any) {
+          logger.error(`Failed to clean up after detection error: ${cleanupError.message}`);
+        }
+        
+        activePolling.delete(task.taskId);
+      });
+    }
+  }
+  
+  if (resumedCount > 0 || skippedCount > 0) {
+    logger.info(`Completion detection resume complete: ${resumedCount} resumed, ${skippedCount} skipped`);
+  }
 }
 
 /**

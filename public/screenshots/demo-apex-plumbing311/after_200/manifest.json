@@ -1,0 +1,19 @@
+{
+  "taskId": "demo-apex-plumbing311",
+  "prefix": "after",
+  "iteration": 200,
+  "timestamp": "2026-01-11T08:16:30.433Z",
+  "baseUrl": "http://localhost:8081",
+  "totalPages": 1,
+  "totalSections": 0,
+  "pages": [
+    {
+      "url": "http://localhost:8081/",
+      "pageSlug": "home",
+      "fullPage": "",
+      "sectionCount": 0,
+      "sections": [],
+      "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:8081/\nCall log:\n\u001b[2m  - navigating to \"http://localhost:8081/\", waiting until \"networkidle\"\u001b[22m\n"
+    }
+  ]
+}

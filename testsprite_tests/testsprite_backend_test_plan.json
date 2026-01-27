@@ -1,0 +1,127 @@
+[
+  {
+    "id": "TC001",
+    "title": "get_basic_health_check",
+    "description": "Verify the /health GET endpoint returns server health status with a 200 response including status and timestamp."
+  },
+  {
+    "id": "TC002",
+    "title": "get_detailed_health_check_with_clickup_status",
+    "description": "Verify the /api/health GET endpoint returns detailed server health including ClickUp connection status, user info, and timestamp with a 200 response."
+  },
+  {
+    "id": "TC003",
+    "title": "get_webhook_enabled_status",
+    "description": "Verify the /api/webhook/status GET endpoint returns the current webhook enabled or disabled state with a 200 response."
+  },
+  {
+    "id": "TC004",
+    "title": "post_toggle_webhook_state",
+    "description": "Verify the /api/webhook/toggle POST endpoint toggles the webhook state and returns the new state and a confirmation message with a 200 response."
+  },
+  {
+    "id": "TC005",
+    "title": "post_enable_webhook",
+    "description": "Verify the /api/webhook/enable POST endpoint enables the webhook and returns a 200 response confirming the action."
+  },
+  {
+    "id": "TC006",
+    "title": "post_disable_webhook",
+    "description": "Verify the /api/webhook/disable POST endpoint disables the webhook and returns a 200 response confirming the action."
+  },
+  {
+    "id": "TC007",
+    "title": "post_receive_clickup_webhook_events",
+    "description": "Verify the /webhook/clickup POST endpoint correctly processes incoming ClickUp webhook events with event, task_id, and webhook_id in the payload and returns a 200 response."
+  },
+  {
+    "id": "TC008",
+    "title": "get_initiate_clickup_oauth_flow",
+    "description": "Verify the /auth/clickup GET endpoint initiates the OAuth flow by redirecting to ClickUp authorization with a 302 response."
+  },
+  {
+    "id": "TC009",
+    "title": "get_clickup_oauth_callback_handling",
+    "description": "Verify the /auth/clickup/callback GET endpoint correctly handles OAuth callback with code or error query parameters, returning 200 on success and 400 on error."
+  },
+  {
+    "id": "TC010",
+    "title": "get_all_tasks",
+    "description": "Verify the /api/tasks GET endpoint returns a list of all tasks with a 200 response."
+  },
+  {
+    "id": "TC011",
+    "title": "Demo Creation - Slug Availability Check",
+    "description": "Verify GET /api/demo/check-slug endpoint correctly checks if a slug is available, returns available=true for new slugs, available=false for existing/reserved slugs, and handles validation errors with appropriate status codes."
+  },
+  {
+    "id": "TC012",
+    "title": "Demo Creation - GitHub Repository Validation",
+    "description": "Verify POST /api/git/test-repo endpoint validates GitHub repository accessibility, returns success=true for accessible public repos, returns 404 with error for private/invalid repos, and handles timeout scenarios correctly."
+  },
+  {
+    "id": "TC013",
+    "title": "Demo Creation - Validation and Required Fields",
+    "description": "Verify POST /api/demo/create endpoint validates required fields (businessName, primaryColor, templateId or githubRepoUrl), validates hex color format, validates slug pattern, returns 400 with appropriate error messages for invalid inputs, and checks slug availability to prevent race conditions."
+  },
+  {
+    "id": "TC014",
+    "title": "Demo Creation - Initial Response and Background Processing",
+    "description": "Verify POST /api/demo/create endpoint returns immediate 200 response with clientSlug and status='starting' when valid data is provided, initiates background demo creation process without blocking the response, and returns proper error handling for background failures."
+  },
+  {
+    "id": "TC015",
+    "title": "Demo Creation - Repository Cloning",
+    "description": "Verify demo creation process correctly clones the template repository from the provided GitHub URL, creates the demo directory in client-websites folder, initializes a fresh Git repository with proper branch name, creates initial commit, and handles clone failures with appropriate error messages."
+  },
+  {
+    "id": "TC016",
+    "title": "Demo Creation - Dependency Installation",
+    "description": "Verify demo creation process runs npm install in the cloned repository directory, handles installation failures gracefully, updates status to 'installing' during dependency installation, and logs installation progress correctly."
+  },
+  {
+    "id": "TC017",
+    "title": "Demo Creation - File Organization and Asset Processing",
+    "description": "Verify demo creation process detects and creates images directory (src/assets/images, src/images, public/images, etc.), moves uploaded logo and heroImage files to the correct location, validates file extensions and handles unsupported formats, saves demo.context.json with all metadata, and creates proper directory structure."
+  },
+  {
+    "id": "TC018",
+    "title": "Demo Creation - CURSOR_TASK.md Generation",
+    "description": "Verify demo creation process generates CURSOR_TASK.md file in the demo directory, replaces all template placeholders correctly (businessName, clientSlug, colors, fonts, imagesDir, etc.), includes proper task structure with step information, and updates status to 'prompting' during generation."
+  },
+  {
+    "id": "TC019",
+    "title": "Demo Creation - Cursor Agent Triggering",
+    "description": "Verify demo creation process calls triggerCursorAgent function with correct parameters (demoDir and mockTask), adds the task to the Cursor Agent Queue, updates status to 'triggering' then 'running', creates proper task state with baseCommitHash and branchName, and handles agent trigger failures appropriately."
+  },
+  {
+    "id": "TC020",
+    "title": "Demo Creation - Status Tracking",
+    "description": "Verify GET /api/demo/status/:clientSlug endpoint returns current demo status with state, message, logs, currentStep, totalSteps, returns 404 for non-existent demos, merges real-time agent logs when demo is in 'running' state, updates status correctly through all stages (starting, cloning, installing, organizing, prompting, triggering, running), and maintains status persistence in demo.status.json file."
+  },
+  {
+    "id": "TC021",
+    "title": "Demo Creation - Demo Site Structure Verification",
+    "description": "Verify created demo site has correct directory structure with all expected files, package.json exists and is valid, Git repository is properly initialized with correct branch, demo.context.json contains all required metadata fields, CURSOR_TASK.md exists with proper content, state files are created in .cursor directory, and uploaded assets are in correct locations with proper filenames."
+  },
+  {
+    "id": "TC022",
+    "title": "Demo Creation - End-to-End Flow with Agent Integration",
+    "description": "Verify complete end-to-end demo creation flow: create demo via API, verify repository cloning completes, verify dependencies install successfully, verify CURSOR_TASK.md is generated with correct content, verify agent is added to queue and triggered, verify status transitions correctly through all stages, verify demo site is fully functional after creation, verify agent processes the task and makes changes, and verify status endpoint provides accurate real-time updates."
+  },
+  {
+    "id": "TC023",
+    "title": "Demo Creation - Error Handling and Cleanup",
+    "description": "Verify demo creation handles errors at each stage gracefully, updates status to 'failed' with error message on failure, cleans up partial demo directories on failure when appropriate, prevents duplicate demo creation for same slug, handles file lock issues on Windows correctly, and provides meaningful error messages to the API caller."
+  },
+  {
+    "id": "TC024",
+    "title": "Demo Creation - Status Manager Integration",
+    "description": "Verify DemoStatusManager correctly writes and reads status from demo.status.json, maintains in-memory cache for performance, syncs with TaskStatusManager for agent logs, updates audit log (active-demos.json), handles concurrent status updates atomically, and provides accurate status even during active creation."
+  },
+  {
+    "id": "TC025",
+    "title": "Demo Creation - Slug Generation and Uniqueness",
+    "description": "Verify generateUniqueSlug function normalizes business names to URL-safe slugs, appends unique suffix when slug already exists, handles reserved slugs correctly, prevents slug collisions through proper reservation mechanism, and generates deterministic slugs when manual slug is provided."
+  }
+]

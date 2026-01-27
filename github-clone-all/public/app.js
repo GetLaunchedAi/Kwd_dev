@@ -110,9 +110,6 @@ form.addEventListener('submit', async (e) => {
     progressText.textContent = '0%';
 
     try {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:112',message:'Frontend: Starting fetch to /api/clone',data:{hasUsername:!!formData.username,hasToken:!!formData.token,directory:formData.directory},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
 
         const response = await fetch('/api/clone', {
             method: 'POST',
@@ -122,9 +119,6 @@ form.addEventListener('submit', async (e) => {
             body: JSON.stringify(formData),
         });
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:123',message:'Frontend: Fetch response received',data:{ok:response.ok,status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
 
         if (!response.ok) {
             throw new Error('Failed to start cloning operation');
@@ -133,16 +127,10 @@ form.addEventListener('submit', async (e) => {
         const data = await response.json();
         currentOperationId = data.operationId;
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:131',message:'Frontend: Clone operation started',data:{operationId:currentOperationId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
 
         // Start polling for progress
         startProgressPolling();
     } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ba0e9212-a723-45eb-a5c4-2ac1c27b1b9d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:137',message:'Frontend: Fetch error caught',data:{errorMessage:error.message,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
 
         showError(error.message);
         submitBtn.disabled = false;

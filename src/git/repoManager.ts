@@ -22,6 +22,95 @@ interface SearchFolder {
 }
 
 /**
+ * Checks if Git user.name and user.email are configured globally
+ */
+export async function isGitConfigured(): Promise<boolean> {
+  const git: SimpleGit = simpleGit();
+  try {
+    const gitConfig = await git.listConfig();
+    return !!(gitConfig.all['user.name'] && gitConfig.all['user.email']);
+  } catch (error: any) {
+    logger.error(`Git config check failed: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Gets the configured git user from settings, with fallback defaults
+ */
+export function getGitUserConfig(): { name: string; email: string } {
+  return {
+    name: config.git.userName || 'KWD Dev Bot',
+    email: config.git.userEmail || 'bot@kwd.dev'
+  };
+}
+
+/**
+ * Applies git user config to a repository (local scope)
+ */
+export async function applyGitUserConfig(folderPath: string): Promise<void> {
+  const git: SimpleGit = simpleGit(folderPath);
+  const { name, email } = getGitUserConfig();
+  
+  try {
+    await git.addConfig('user.name', name, false, 'local');
+    await git.addConfig('user.email', email, false, 'local');
+    logger.info(`Applied git user config: ${name} <${email}> to ${folderPath}`);
+  } catch (error: any) {
+    logger.error(`Failed to apply git user config: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Checks if Git is installed and working by running git --version
+ */
+export async function checkGitInstallation(): Promise<{ installed: boolean; version?: string; error?: string }> {
+  const git: SimpleGit = simpleGit();
+  try {
+    const version = await git.version();
+    return {
+      installed: true,
+      version: version.major + '.' + version.minor + '.' + version.patch
+    };
+  } catch (error: any) {
+    logger.error(`Git installation check failed: ${error.message}`);
+    return {
+      installed: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Checks git status in a specific directory (defaults to current project root)
+ */
+export async function checkGitStatus(folderPath: string = process.cwd()): Promise<{ success: boolean; status?: string; error?: string }> {
+  const git: SimpleGit = simpleGit(folderPath);
+  try {
+    // Check if it's a git repo first
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      return {
+        success: false,
+        error: `Directory ${folderPath} is not a Git repository`
+      };
+    }
+    const status = await git.status();
+    return {
+      success: true,
+      status: JSON.stringify(status, null, 2)
+    };
+  } catch (error: any) {
+    logger.error(`Git status check failed for ${folderPath}: ${error.message}`);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Finds a client folder by name using multiple matching strategies
  */
 export async function findClientFolder(clientName: string): Promise<ClientFolderInfo | null> {
@@ -43,36 +132,45 @@ export async function findClientFolder(clientName: string): Promise<ClientFolder
       fullPath: path.join(githubCloneAllDir, entry.name)
     }));
 
-  // Special case: If there's a client-websites folder, also include its children
-  const clientWebsitesDir = path.join(githubCloneAllDir, 'client-websites');
-  if (fs.existsSync(clientWebsitesDir)) {
-    const subEntries = await fs.readdir(clientWebsitesDir, { withFileTypes: true });
-    const subFolders = subEntries
-      .filter(entry => entry.isDirectory())
-      .map(entry => ({
-        name: entry.name,
-        fullPath: path.join(clientWebsitesDir, entry.name)
-      }));
-    
-    // Add subfolders to the search list
-    searchFolders = [...searchFolders, ...subFolders];
-  }
-
   // Strategy 1: Exact match (case-sensitive)
   let match = searchFolders.find(folder => folder.name === clientName);
-  if (match) {
+  if (match && fs.existsSync(path.join(match.fullPath, '.git'))) {
     logger.info(`Found exact match: ${match.name}`);
     return await validateGitRepo(match.fullPath);
   }
 
-  // Strategy 2: Case-insensitive match
-  match = searchFolders.find(folder => folder.name.toLowerCase() === clientName.toLowerCase());
+  // Strategy 2: Hyphenated match (Jacks Roofing -> jacks-roofing)
+  const hyphenatedClientName = clientName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  match = searchFolders.find(folder => folder.name.toLowerCase() === hyphenatedClientName);
   if (match) {
-    logger.info(`Found case-insensitive match: ${match.name}`);
+    logger.info(`Found hyphenated match: ${match.name}`);
     return await validateGitRepo(match.fullPath);
   }
 
-  // Strategy 3: Fuzzy match (contains or similar)
+  // Strategy 3: Look inside a nested client-websites folder (only if not already in one)
+  const isAlreadyInClientWebsites = githubCloneAllDir.endsWith('client-websites') || 
+                                   githubCloneAllDir.endsWith('client-websites' + path.sep);
+  
+  if (!isAlreadyInClientWebsites) {
+    const clientWebsitesDir = path.join(githubCloneAllDir, 'client-websites');
+    if (fs.existsSync(clientWebsitesDir)) {
+      const subEntries = await fs.readdir(clientWebsitesDir, { withFileTypes: true });
+      const subFolders = subEntries
+        .filter(entry => entry.isDirectory())
+        .map(entry => ({
+          name: entry.name,
+          fullPath: path.join(clientWebsitesDir, entry.name)
+        }));
+      
+      match = subFolders.find(folder => folder.name === clientName || folder.name.toLowerCase() === hyphenatedClientName);
+      if (match) {
+          logger.info(`Found match in nested client-websites: ${match.name}`);
+          return await validateGitRepo(match.fullPath);
+      }
+    }
+  }
+
+  // Strategy 4: Fuzzy match (contains or similar)
   const fuzzyMatches = searchFolders.filter(folder => 
     folder.name.toLowerCase().includes(clientName.toLowerCase()) ||
     clientName.toLowerCase().includes(folder.name.toLowerCase())
@@ -114,10 +212,12 @@ async function validateGitRepo(folderPath: string): Promise<ClientFolderInfo | n
 }
 
 /**
- * Pulls latest changes from the default branch
+ * Pulls latest changes from the default branch.
+ * Safety: If uncommitted changes exist, it will NOT perform a hard reset unless explicitely told to,
+ * or if we are sure no other agent is working on this repository.
  */
-export async function pullLatestChanges(folderPath: string): Promise<void> {
-  logger.info(`Pulling latest changes from ${folderPath}`);
+export async function pullLatestChanges(folderPath: string, forceReset: boolean = false): Promise<void> {
+  logger.info(`Pulling latest changes from ${folderPath} (forceReset: ${forceReset})`);
 
   const git: SimpleGit = simpleGit(folderPath);
   const defaultBranch = config.git.defaultBranch;
@@ -125,17 +225,28 @@ export async function pullLatestChanges(folderPath: string): Promise<void> {
   try {
     const status = await git.status();
     if (status.files.length > 0) {
-      logger.warn(`Uncommitted changes detected in ${folderPath}. Performing hard reset to origin/${defaultBranch}.`);
-      await git.reset(['--hard', `origin/${defaultBranch}`]);
+      if (forceReset) {
+        logger.warn(`Uncommitted changes detected in ${folderPath}. Performing hard reset to origin/${defaultBranch} as requested.`);
+        await git.reset(['--hard', `origin/${defaultBranch}`]);
+      } else {
+        // If not forcing reset, we check if we can just pull (if it's clean) or if we should skip
+        logger.info(`Uncommitted changes detected in ${folderPath}. Skipping hard reset to preserve potential work.`);
+        // We still try to checkout and pull, which might fail if there are conflicts, 
+        // but that's better than wiping out work.
+      }
     }
 
     await git.checkout(defaultBranch);
-
     await git.pull('origin', defaultBranch);
 
     logger.info(`Successfully pulled latest changes from ${defaultBranch}`);
   } catch (error: any) {
     logger.error(`Error pulling latest changes: ${error.message}`);
+    // If it's a conflict error and we didn't force reset, explain why
+    if (error.message.includes('overwritten by merge') && !forceReset) {
+      logger.warn(`Pull failed due to local changes in ${folderPath}. This is expected if an agent is active.`);
+      return; // Silently continue - we'll work with what we have
+    }
     throw error;
   }
 }

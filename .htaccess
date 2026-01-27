@@ -1,0 +1,26 @@
+RewriteEngine On
+RewriteBase /
+
+# --------------------------------------------------
+# Force Apache NOT to look for index.php
+# --------------------------------------------------
+DirectoryIndex disabled
+
+# --------------------------------------------------
+# ClickUp OAuth callback (served by PHP)
+# --------------------------------------------------
+RewriteRule ^auth/clickup/callback$ /auth/clickup/callback.php [L]
+RewriteRule ^auth/clickup/callback\.php$ - [L]
+
+# --------------------------------------------------
+# EVERYTHING ELSE → Node (PM2 :3000)
+# --------------------------------------------------
+# Note: Demo static files at /client-websites/{slug}/ are served by
+# Express middleware in server.ts with:
+# - Slug validation and path security checks
+# - Cache-Control: no-cache headers for fresh content
+# - Fallback to index.html for SPA routing
+# --------------------------------------------------
+RewriteCond %{REQUEST_URI} !^/auth/clickup/callback
+RewriteCond %{REQUEST_URI} !^/auth/clickup/callback\.php
+RewriteRule ^ http://127.0.0.1:3000%{REQUEST_URI} [P,L]

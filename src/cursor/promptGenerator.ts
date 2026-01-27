@@ -7,6 +7,8 @@ export interface PromptData {
   taskName: string;
   taskUrl: string;
   taskId: string;
+  client: string;
+  clientFolder: string;
   status: string;
   description: string;
   requirements?: string;
@@ -14,6 +16,7 @@ export interface PromptData {
   filesToModify?: string;
   testCommand?: string;
   branchName?: string;
+  downloadedAttachments?: string[];
 }
 
 /**
@@ -21,11 +24,15 @@ export interface PromptData {
  */
 export async function generatePromptFile(
   clientFolder: string,
+  client: string,
   task: ClickUpTask,
   branchName?: string,
-  testCommand?: string
+  testCommand?: string,
+  downloadedAttachments?: string[]
 ): Promise<string> {
+  
   const promptPath = path.join(clientFolder, 'CURSOR_TASK.md');
+  
   
   // Extract requirements from task description
   const requirements = extractRequirements(task.description);
@@ -36,16 +43,19 @@ export async function generatePromptFile(
     taskName: task.name,
     taskUrl: task.url,
     taskId: task.id,
+    client,
+    clientFolder,
     status: task.status.status,
     description: task.description || 'No description provided',
     requirements,
     suggestedChanges,
     filesToModify,
     testCommand: testCommand || 'npm test',
-    branchName,
+    branchName: branchName ? `**Branch**: ${branchName}` : '',
+    downloadedAttachments,
   };
 
-  const content = formatPromptFile(promptData);
+  const content = await formatPromptFile(promptData);
   
   await fs.writeFile(promptPath, content, 'utf-8');
   logger.info(`Generated CURSOR_TASK.md at ${promptPath}`);
@@ -139,42 +149,101 @@ function suggestFilesToModify(description: string): string {
 /**
  * Formats the prompt file content
  */
-function formatPromptFile(data: PromptData): string {
-  return `# Task: ${data.taskName}
+async function formatPromptFile(data: PromptData): Promise<string> {
+  const templatePath = path.join(__dirname, 'task_template.md');
+  let templateContent: string;
+  
+  try {
+    if (await fs.pathExists(templatePath)) {
+      templateContent = await fs.readFile(templatePath, 'utf-8');
+    } else {
+      logger.warn(`Task template not found at ${templatePath}, using fallback`);
+      templateContent = getFallbackTemplate();
+    }
+  } catch (err) {
+    logger.error(`Error reading task template: ${err}`);
+    templateContent = getFallbackTemplate();
+  }
 
-**ClickUp Task**: ${data.taskUrl}
-**Task ID**: ${data.taskId}
-**Status**: ${data.status}
-${data.branchName ? `**Branch**: ${data.branchName}` : ''}
+  let attachmentSection = '';
+  if (data.downloadedAttachments && data.downloadedAttachments.length > 0) {
+    attachmentSection = `
 
-## Description
-${data.description}
+## Attached Reference Images
+The following images were attached to the ClickUp task and downloaded locally:
+${data.downloadedAttachments.map(filePath => {
+  // Make path relative to clientFolder (which is usually the repo root)
+  const relPath = path.relative(data.clientFolder, filePath);
+  return `- ${relPath.replace(/\\/g, '/')}`;
+}).join('\n')}
 
-## Requirements
-${data.requirements || 'Review the task description and identify all requirements.'}
+`;
+  }
 
-## Suggested Changes
-${data.suggestedChanges || 'Analyze the task and determine what code changes are needed.'}
+  // Replace placeholders
+  let content = templateContent;
+  content = content.replace(/\$\{attachmentSection\}/g, attachmentSection);
+  
+  // Replace ${data.xxx} placeholders
+  const keys = Object.keys(data) as (keyof PromptData)[];
+  for (const key of keys) {
+    const value = data[key];
+    const stringValue = Array.isArray(value) ? value.join('\n') : (value || '');
+    // Replace all occurrences of ${data.key}
+    content = content.split(`\${data.${key}}`).join(stringValue);
+  }
 
-## Files to Review/Modify
-${data.filesToModify || 'Identify relevant files based on the task requirements.'}
+  return content;
+}
 
-## Testing
-- Run: ${data.testCommand || 'npm test'}
-- Expected: All tests pass
+/**
+ * Returns the fallback template if the template file is missing
+ */
+function getFallbackTemplate(): string {
+  return `# Task: \${data.taskName}
 
-## Success Criteria
-- [ ] Changes implemented according to requirements
-- [ ] Code follows project conventions and style
-- [ ] Tests passing
-- [ ] No console errors or warnings
-- [ ] Code is properly formatted
+## 1. Goal + Acceptance Criteria
+**Objective**: \${data.description}
+
+**Requirements**:
+\${data.requirements}
+
+**Success Criteria**:
+- All requirements are implemented.
+- Code matches the project's standards.
+- Local validation passes.\${attachmentSection}
+## 2. Metadata
+**ClickUp Task**: \${data.taskUrl}
+**Task ID**: \${data.taskId}
+**Client**: \${data.client}
+**Client Folder**: \${data.clientFolder}
+**Status**: \${data.status}
+\${data.branchName}
+
+## 3. Constraints
+1. **No Push**: NEVER push your changes to GitHub. The system handles the push after approval.
+2. **Run Tests**: Always run the validation command before finishing.
+3. **Scope**: Only work on this task. Do not explore other parts of the codebase unless necessary.
+
+## 4. Local Validation
+- **Command**: \${data.testCommand} (Run this inside \${data.clientFolder} if possible)
+- **Expected**: All tests pass and changes are verified locally.
+
+## 5. What "Done" Means
+1. **Development**: Implement requested changes.
+2. **Validation**: Run the validation command and ensure it passes.
+3. **Status Update**: Update \\.cursor/status/current.json with state: "done", percent: 100, and step: "Completed".
+4. **Commit**: Commit your changes with a message like task: [\${data.taskId}] description.
+5. **EXIT**: After committing and updating status, **EXIT IMMEDIATELY**. Do not wait for further instructions.
 
 ---
 
-**Note**: This task will be processed by Cursor's agent automatically. The workflow tool will monitor for completion and proceed with testing once changes are detected.
+**Technical Suggestions**:
+### Suggested Changes
+\${data.suggestedChanges}
 
-When you have completed the changes, commit them to this branch. The workflow tool will detect the changes and proceed with testing.
+### Files to Review/Modify
+\${data.filesToModify}
 `;
 }
 

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Cloner - KWD Dev</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-card { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 24px; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; }
+        input[type="text"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        .token-input-group { display: flex; gap: 10px; }
+        .token-input-group input { flex: 1; }
+        .btn-primary { background: #667eea; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: 600; width: 100%; font-size: 16px; }
+        .btn-secondary { background: #4a5568; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+        .checkbox-group { margin-bottom: 24px; }
+        .checkbox-label { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; cursor: pointer; }
+        .help-text { font-size: 12px; color: #718096; margin-top: 4px; display: block; }
+        .hidden { display: none; }
+        .progress-section { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 24px; }
+        .progress-bar-container { background: #edf2f7; height: 24px; border-radius: 12px; overflow: hidden; position: relative; margin-bottom: 16px; }
+        .progress-bar { background: #667eea; height: 100%; width: 0%; transition: width 0.3s; }
+        .progress-text { position: absolute; width: 100%; text-align: center; top: 0; line-height: 24px; font-size: 12px; font-weight: 700; color: #2d3748; }
+        .progress-log { background: #1a202c; color: #a0aec0; padding: 16px; border-radius: 4px; height: 200px; overflow-y: auto; font-family: monospace; font-size: 13px; }
+        .progress-log-item { margin-bottom: 4px; border-bottom: 1px solid #2d3748; padding-bottom: 2px; }
+        .progress-log-item.success { color: #48bb78; }
+        .progress-log-item.error { color: #f56565; }
+        .progress-log-item.updating { color: #ed8936; }
+        .result-section { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .result-content { padding: 16px; border-radius: 4px; }
+        .result-content.success { background: #f0fff4; color: #276749; border: 1px solid #c6f6d5; }
+        .result-content.error { background: #fff5f5; color: #9b2c2c; border: 1px solid #fed7d7; }
+        .token-test-result { position: fixed; top: 20px; right: 20px; padding: 12px 24px; border-radius: 4px; color: white; font-weight: 600; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; transition: opacity 0.3s; }
+        .token-test-result.success { background: #48bb78; }
+        .token-test-result.error { background: #f56565; }
+        header { text-align: center; margin-bottom: 32px; }
+        header h1 { color: #2d3748; margin-bottom: 8px; }
+        header p { color: #718096; }
+        nav { margin-bottom: 20px; }
+        nav a { text-decoration: none; color: #667eea; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+            <a href="/">&larr; Back to Dashboard</a>
+        </nav>
+        <header>
+            <h1>🚀 GitHub Cloner</h1>
+            <p>Clone all repositories from a GitHub account into your project</p>
+        </header>
+
+        <main>
+            <form id="cloneForm" class="form-card">
+                <div class="form-group">
+                    <label for="username">GitHub Username or Organization</label>
+                    <input type="text" id="username" name="username" placeholder="GetLaunchedAi" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="token">GitHub Personal Access Token</label>
+                    <div class="token-input-group">
+                        <input type="password" id="token" name="token" placeholder="ghp_xxxxxxxxxxxx" required>
+                        <button type="button" id="testTokenBtn" class="btn-secondary">Test Token</button>
+                    </div>
+                    <small class="help-text">
+                        <a href="https://github.com/settings/tokens" target="_blank">Get a token here</a> 
+                        (requires: repo scope for private repos, read:org for organizations)
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label for="directory">Target Directory</label>
+                    <input type="text" id="directory" name="directory" placeholder="./repos" value="./repos">
+                    <small class="help-text">Directory where repositories will be cloned (relative to KWD Dev root)</small>
+                    <small class="help-text" id="resolvedPath" style="display: none; color: #667eea; font-weight: 600;"></small>
+                </div>
+
+                <div class="form-group">
+                    <label for="filter">Filter by Name (Optional)</label>
+                    <input type="text" id="filter" name="filter" placeholder="website">
+                    <small class="help-text">Only clone repos containing this text in their name</small>
+                </div>
+
+                <div class="checkbox-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="includePrivate" name="includePrivate">
+                        <span>Include private repositories</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="useSSH" name="useSSH">
+                        <span>Use SSH URLs instead of HTTPS</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="updateExisting" name="updateExisting" checked>
+                        <span>Update existing repositories (pull latest changes)</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="submitBtn" class="btn-primary">
+                    Start Cloning
+                </button>
+            </form>
+
+            <div id="progressSection" class="progress-section hidden">
+                <h2>Progress</h2>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                    <span class="progress-text" id="progressText">0%</span>
+                </div>
+                <div class="progress-stats" id="progressStats">
+                    <div class="stat-item">
+                        <span class="stat-label">⏱️ Time Elapsed:</span>
+                        <span id="timerText">00:00:00</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">⏳ Estimated Finish:</span>
+                        <span id="etcText">Calculating...</span>
+                    </div>
+                </div>
+                <div id="progressLog" class="progress-log"></div>
+            </div>
+
+            <div id="resultSection" class="result-section hidden">
+                <h2>Results</h2>
+                <div id="resultContent" class="result-content"></div>
+            </div>
+        </main>
+
+        <div id="tokenTestResult" class="token-test-result hidden"></div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="cloner.js"></script>
+</body>
+</html>

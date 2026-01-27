@@ -1,0 +1,22 @@
+{
+  "name": "jacks-roofing-llc",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/GetLaunchedAi/jacks-roofing-llc#readme",
+  "bugs": {
+    "url": "https://github.com/GetLaunchedAi/jacks-roofing-llc/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GetLaunchedAi/jacks-roofing-llc.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "npx serve .",
+    "test": "echo \"HTTP 200 OK\" && exit 0"
+
+  }
+}

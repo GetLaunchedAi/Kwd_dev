@@ -1,0 +1,740 @@
+[
+  {
+    "id": "TC001",
+    "title": "Health Check Endpoint - Basic",
+    "description": "Verify the /health endpoint returns server health status with status code 200",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /health endpoint"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status code is 200"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response body contains 'status' set to 'healthy' and a valid 'timestamp'"
+      }
+    ]
+  },
+  {
+    "id": "TC002",
+    "title": "Health Check Endpoint - Detailed including ClickUp status",
+    "description": "Verify the /api/health endpoint returns detailed server and ClickUp API connection status",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /api/health endpoint"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status code is 200"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response body includes 'status', 'timestamp', and 'clickup' status object with 'status' and 'user' details"
+      }
+    ]
+  },
+  {
+    "id": "TC003",
+    "title": "Webhook Enable/Disable Toggle Behavior",
+    "description": "Ensure the webhook toggling API correctly enables and disables the webhook and responses reflect current state",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/webhook/enable to enable the webhook"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response indicates webhook is enabled"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/webhook/status to verify webhook is enabled"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response shows enabled=true"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/webhook/toggle to disable the webhook"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response indicates webhook is disabled"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/webhook/status to verify webhook is disabled"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response shows enabled=false"
+      }
+    ]
+  },
+  {
+    "id": "TC004",
+    "title": "Webhook Process Incoming ClickUp Events",
+    "description": "Verify /webhook/clickup endpoint processes valid webhook events and returns 200",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /webhook/clickup with valid JSON payload containing event, task_id, and webhook_id"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify server responds with HTTP 200 and acknowledgement of webhook processing"
+      }
+    ]
+  },
+  {
+    "id": "TC005",
+    "title": "OAuth Flow - Successful Authorization",
+    "description": "Test the initial OAuth authorization redirect and successful callback handling for ClickUp",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /auth/clickup to initiate OAuth flow"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status is 302 redirect to ClickUp authorization page"
+      },
+      {
+        "type": "action",
+        "description": "Simulate OAuth callback by sending GET to /auth/clickup/callback with valid 'code' query parameter without 'error'"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and confirms successful OAuth authorization"
+      }
+    ]
+  },
+  {
+    "id": "TC006",
+    "title": "OAuth Flow - Authorization Error Handling",
+    "description": "Verify OAuth callback handles error query parameter correctly and returns appropriate error response",
+    "category": "error handling",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /auth/clickup/callback with 'error' query parameter indicating authorization failure"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 400 and appropriate error message is returned"
+      }
+    ]
+  },
+  {
+    "id": "TC007",
+    "title": "Import Single Task - Valid Data",
+    "description": "Verify importing a single ClickUp task works correctly with all inputs valid and triggers workflow if requested",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/tasks/import with JSON body containing valid taskId, clientName, and triggerWorkflow=true"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and task imported successfully"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the workflow is triggered and documented by logs/events"
+      }
+    ]
+  },
+  {
+    "id": "TC008",
+    "title": "Import Single Task - Missing Required Fields",
+    "description": "Verify error response when required fields are missing or invalid in task import request",
+    "category": "error handling",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/tasks/import without required taskId field or with invalid taskId"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 400 and error message indicating missing/invalid input"
+      }
+    ]
+  },
+  {
+    "id": "TC009",
+    "title": "Bulk Import Incomplete Tasks",
+    "description": "Verify bulk import endpoint imports incomplete tasks and returns results correctly",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/tasks/import-incomplete with filter options to select incomplete tasks"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and includes import results summary"
+      }
+    ]
+  },
+  {
+    "id": "TC010",
+    "title": "Retrieve Task Git Diff",
+    "description": "Verify retrieval of git diff for a specific task by taskId returns correct diff or 404 if task not found",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /api/tasks/:taskId/diff with valid taskId"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and response body contains git diff data"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/tasks/:taskId/diff with invalid/nonexistent taskId"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 404 and error message"
+      }
+    ]
+  },
+  {
+    "id": "TC011",
+    "title": "Manual Cursor Agent Trigger for Task",
+    "description": "Verify that manually triggering the Cursor agent for a task works correctly and returns success",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/tasks/:taskId/trigger-agent with valid taskId"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and agent trigger confirmation"
+      }
+    ]
+  },
+  {
+    "id": "TC012",
+    "title": "Human-in-the-loop Approval Flow - Approve via Secure Token",
+    "description": "Verify approval link with valid token allows approval and workflow proceeds",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /approve/:token with valid approval token"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and approval acknowledgment"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the task workflow is marked approved and proceeds to merge or next step"
+      }
+    ]
+  },
+  {
+    "id": "TC013",
+    "title": "Human-in-the-loop Approval Flow - Reject with Feedback",
+    "description": "Verify rejection link or API rejects the task with feedback and triggers re-run",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/tasks/:taskId/reject with feedback message"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and rejection confirmation"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify workflow initiates rerun logic based on feedback"
+      }
+    ]
+  },
+  {
+    "id": "TC014",
+    "title": "Demo Creation - Slug Availability Check",
+    "description": "Verify demo creation slug availability endpoint correctly identifies taken and available slugs",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /api/demo/check-slug with a slug string known to be unavailable"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response shows available=false"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/demo/check-slug with a unique slug string"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response shows available=true"
+      }
+    ]
+  },
+  {
+    "id": "TC015",
+    "title": "Demo Creation - Upload and Process Branding Assets",
+    "description": "Verify demo creation accepts valid multipart data including branding assets and creates demo within 5 minutes",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/demo/create with multipart form data including clientName, valid githubUrl, logo file, brandColors, and brandFonts"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and demo created confirmation"
+      },
+      {
+        "type": "action",
+        "description": "Poll /api/demo/status/:clientSlug to confirm demo creation completes within 5 minutes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify demo status reaches 'complete' and is accessible"
+      }
+    ]
+  },
+  {
+    "id": "TC016",
+    "title": "GitHub Repository Accessibility Check",
+    "description": "Verify GitHub repo URL test endpoint correctly identifies valid accessible and invalid or private repos",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/git/test-repo with JSON body containing accessible github repository URL"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and confirmation of repository accessibility"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/git/test-repo with JSON body containing invalid or private github repository URL"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 404 and error indicating inaccessible repository"
+      }
+    ]
+  },
+  {
+    "id": "TC017",
+    "title": "Preview Management - Start, Stop, and Command Controls",
+    "description": "Verify preview management APIs can start, stop previews and send commands with reliable state updates",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/previews/start with clientName to start preview"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response confirms preview started"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/previews to list active previews"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify clientName preview is listed"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/previews/command with clientName and command to interact with preview"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response confirms command sent"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/previews/stop with clientName to stop preview"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response confirms preview stopped"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/previews/:clientName for stopped client"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify preview for client is no longer active or returns appropriate status"
+      }
+    ]
+  },
+  {
+    "id": "TC018",
+    "title": "Task-Client Mapping CRUD Operations",
+    "description": "Verify creating, retrieving, deleting task to client mappings work correctly including pattern-based mappings",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/mappings/task/:taskId with clientName to create mapping"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and mapping creation confirmation"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/mappings/task/:taskId to retrieve mapping"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response returns mapping data with correct clientName"
+      },
+      {
+        "type": "action",
+        "description": "Send DELETE request to /api/mappings/task/:taskId to delete mapping"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and mapping deletion confirmation"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/mappings/pattern to add pattern mapping"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pattern mapping added confirmation"
+      },
+      {
+        "type": "action",
+        "description": "Send DELETE request to /api/mappings/pattern to remove pattern mapping"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pattern mapping removed confirmation"
+      }
+    ]
+  },
+  {
+    "id": "TC019",
+    "title": "Cursor Agent Queue Monitoring and Reset",
+    "description": "Verify Cursor agent queue status can be retrieved, queue cleared, and agent state reset per task",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /api/cursor/status to check agent queue status"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response returns current queue status data"
+      },
+      {
+        "type": "action",
+        "description": "Send DELETE request to /api/cursor/queue to clear the agent queue"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response confirms queue cleared"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/cursor/reset with JSON body including valid taskId to reset agent state"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and agent reset confirmation"
+      }
+    ]
+  },
+  {
+    "id": "TC020",
+    "title": "Report Scheduling and Execution Flow",
+    "description": "Verify user can schedule reports, enqueue report jobs, and retrieve report statuses and latest results",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/schedules to create a new report schedule with required fields"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 201 and schedule creation confirmation"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/reports/run to enqueue new report job"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and jobId in response"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/reports/jobs/:jobId to get report job status"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify job status is returned and indicates progress or completion"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/reports/:siteSlug/latest with report type query to fetch latest completed report"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify latest report data is returned if available or 404 if no report found"
+      }
+    ]
+  },
+  {
+    "id": "TC021",
+    "title": "Report Sharing - Create and Access Share Links",
+    "description": "Verify creation of shareable report links and access to shared report data and artifacts via tokens",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send POST request to /api/reports/share with siteSlug, runId, and reportType to create share link"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and share link token returned"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /r/:token to access shared report viewer HTML page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify 200 response and valid HTML content"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/reports/share/data/:token to retrieve report data"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify 200 response with report data JSON"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /api/reports/share/artifact/:token/* to retrieve report artifact file"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify 200 response with artifact file or 404 if not found"
+      }
+    ]
+  },
+  {
+    "id": "TC022",
+    "title": "Uptime Monitoring Endpoint",
+    "description": "Verify uptime summary endpoint returns correct site uptime data",
+    "category": "functional",
+    "priority": "Low",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /api/uptime/:siteSlug with valid site slug"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and contains uptime summary data for site"
+      }
+    ]
+  },
+  {
+    "id": "TC023",
+    "title": "Approval and Rejection Links - Invalid Token Handling",
+    "description": "Verify approval and rejection endpoints return 404 when invalid or expired tokens are provided",
+    "category": "error handling",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /approve/:token with invalid or expired token"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 404 and error message indicates request not found"
+      },
+      {
+        "type": "action",
+        "description": "Send GET request to /reject/:token with invalid or expired token"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 404 and error message indicates request not found"
+      }
+    ]
+  },
+  {
+    "id": "TC024",
+    "title": "Settings Management - Get and Update",
+    "description": "Verify retrieval and updating of application-wide settings function correctly with appropriate responses",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send GET request to /api/settings to retrieve current settings"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and settings object is returned"
+      },
+      {
+        "type": "action",
+        "description": "Send POST request to /api/settings with JSON object to update settings"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and confirmation of settings update"
+      }
+    ]
+  },
+  {
+    "id": "TC025",
+    "title": "Task Description and System Prompt Update",
+    "description": "Verify updating a task's description and system prompt via PATCH requests work as expected",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Send PATCH request to /api/tasks/:taskId/description with new description data"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and description is updated"
+      },
+      {
+        "type": "action",
+        "description": "Send PATCH request to /api/tasks/:taskId/system-prompt with new systemPrompt data"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify response status 200 and system prompt is updated"
+      }
+    ]
+  },
+  {
+    "id": "TC026",
+    "title": "Demo Creation - Complete Flow from Start to Finish",
+    "description": "Verify that a new demo can be created successfully through the frontend UI, from navigating to the create demo page, filling out all form fields, submitting the form, and verifying the demo creation process initiates and status can be tracked",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the main dashboard page"
+      },
+      {
+        "type": "action",
+        "description": "Check slug availability by accessing the slug check endpoint for a test slug"
+      },
+      {
+        "type": "action",
+        "description": "Click on the 'Create Demo' navigation link to access the demo creation form"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the Business Name field with valid data"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the Client Slug field with a unique slug value"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the Contact Email field with a valid email address"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the Contact Phone field with a valid phone number"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the Business Address field with valid address data"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the Primary Color field with a valid hex color code (without # symbol)"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the Secondary Color field with a valid hex color code (without # symbol)"
+      },
+      {
+        "type": "action",
+        "description": "Select a Font Family from the dropdown menu"
+      },
+      {
+        "type": "action",
+        "description": "Click the 'Generate Demo Website' button to submit the form and initiate demo creation"
+      },
+      {
+        "type": "action",
+        "description": "Wait for the demo creation response to confirm submission was successful"
+      },
+      {
+        "type": "action",
+        "description": "Poll the demo status endpoint to verify that the demo creation process has started"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the demo status endpoint returns a valid response containing the clientSlug and status information, indicating the demo creation process is being tracked"
+      },
+      {
+        "type": "action",
+        "description": "Continue polling the demo status endpoint to monitor progress through the workflow stages"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the demo status can be retrieved successfully and shows the demo is in progress or completed"
+      }
+    ]
+  }
+]

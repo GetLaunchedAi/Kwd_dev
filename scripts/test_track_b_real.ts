@@ -1,6 +1,6 @@
 import { clickUpApiClient } from '../src/clickup/apiClient';
 import { findClientFolder } from '../src/git/repoManager';
-import { createFeatureBranch, branchExists } from '../src/git/branchManager';
+import { ensureDevBranch, branchExists } from '../src/git/branchManager';
 import { logger } from '../src/utils/logger';
 import { config } from '../src/config/config';
 import * as path from 'path';
@@ -24,9 +24,9 @@ async function testTrackBWithRealTask() {
     logger.info(`Target folder: ${clientFolder}`);
 
     // 3. Test branch creation
-    logger.info('Testing feature branch creation...');
-    const branchName = await createFeatureBranch(clientFolder, taskId, task.name);
-    logger.info(`Created branch: ${branchName}`);
+    logger.info('Testing dev branch ensure...');
+    const branchName = await ensureDevBranch(clientFolder);
+    logger.info(`Ensured branch: ${branchName}`);
 
     const exists = await branchExists(clientFolder, branchName);
     if (exists) {
@@ -35,9 +35,13 @@ async function testTrackBWithRealTask() {
       logger.error('FAILURE: Feature branch not found.');
     }
 
-    // 4. Test branch name sanitization
-    const sanitized = branchName.replace(`clickup/${taskId}-`, '');
-    logger.info(`Sanitized part of branch name: ${sanitized}`);
+    // 4. Test branch name
+    const expectedBranch = config.git.devBranch || 'main';
+    if (branchName === expectedBranch) {
+      logger.info(`SUCCESS: Branch name is correct: ${branchName}`);
+    } else {
+      logger.error(`FAILURE: Branch name is incorrect: ${branchName} (expected ${expectedBranch})`);
+    }
 
   } catch (error: any) {
     logger.error(`Error in Track B audit: ${error.message}`);

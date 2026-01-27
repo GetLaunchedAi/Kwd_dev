@@ -23,6 +23,24 @@ header {
     border-bottom: #0779e4 3px solid;
 }
 
+.home-icon {
+    float: left;
+    display: inline-block;
+    margin-right: 15px;
+    margin-top: 5px;
+    color: #fff;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.home-icon:hover {
+    color: #0779e4;
+}
+
+.home-icon svg {
+    display: block;
+}
+
 header h1 {
     float: left;
     margin: 0;
@@ -57,7 +75,7 @@ header a:hover {
 
 /* Hero Section */
 .hero, .about-hero, .contact-hero {
-    background: #f4f4f4;
+    background: #f4f4f4 url('hero-background.webp') no-repeat center center/cover;
     padding: 100px 0;
     text-align: center;
 }
@@ -65,6 +83,7 @@ header a:hover {
 .hero h2, .about-hero h2, .contact-hero h2 {
     font-size: 40px;
     margin-bottom: 20px;
+    color: #E0E0E0;
 }
 
 .hero p, .about-hero p, .contact-hero p {
@@ -90,7 +109,7 @@ header a:hover {
 /* Services Section */
 .services {
     padding: 50px 0;
-    background: url('https://images.unsplash.com/photo-1507005313807-145564e5b943?q=80&w=2000&auto=format&fit=crop') no-repeat center center/cover;
+    background: url('https://images.unsplash.com/photo-1635424710928-0544e8512eae?q=80&w=2000&auto=format&fit=crop') no-repeat center center/cover;
 }
 
 .services h2 {
@@ -145,15 +164,30 @@ section.content {
 
 /* Footer */
 footer {
-    background: green;
+    background: orange;
     color: #fff;
     text-align: center;
     padding: 20px 0;
     margin-top: 50px;
 }
 
+footer a {
+    color: #fff;
+    text-decoration: underline;
+}
+
+footer a:hover {
+    color: #f0f0f0;
+}
+
 /* Responsive */
 @media(max-width: 768px) {
+    .home-icon {
+        float: none;
+        display: inline-block;
+        margin-right: 0;
+        margin-bottom: 10px;
+    }
     header h1, header nav {
         float: none;
         text-align: center;

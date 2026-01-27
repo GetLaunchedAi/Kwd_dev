@@ -1,0 +1,112 @@
+{
+  "meta": {
+    "project": "KWD Dev Automation Suite",
+    "date": "2026-01-09",
+    "prepared_by": "Senior Product Manager"
+  },
+  "product_overview": "KWD Dev Automation Suite is an AI-driven web development orchestration platform that automates the transformation of ClickUp project tasks into production-ready website code with integrated approval workflows and live previews.",
+  "core_goals": [
+    "Reduce website demo creation time by 80% and maintenance overhead by 50%.",
+    "Enable a streamlined 'one-click' process from ClickUp task to GitHub pull request with minimal manual intervention.",
+    "Build a scalable and robust agent queue system for managing concurrent automated coding tasks.",
+    "Ensure human-in-the-loop approvals for quality control prior to code deployment."
+  ],
+  "key_features": [
+    "Webhook Processing: Automatic ingestion of ClickUp webhook events to trigger workflows.",
+    "Workflow Orchestration: Manage task lifecycle from import through coding, testing, and approval.",
+    "Demo Creation: Automate cloning of template repos with client branding to bootstrap new sites.",
+    "Cursor Agent Integration: Interface with Cursor IDE's AI agents for automated code generation and changes.",
+    "Approval Workflow: Human reviewers approve or reject changes via email or Slack with secure tokens.",
+    "Reporting & Monitoring: Uptime monitoring and performance report generation for client websites.",
+    "Task Import: Import tasks and associated assets from ClickUp into the system for processing."
+  ],
+  "user_flow_summary": [
+    "User moves a ClickUp task to 'To Do' which triggers webhook processing and task import.",
+    "The system creates a dedicated Git branch, injects task context, and triggers the Cursor agent to perform coding.",
+    "Automated tests run and visual previews generate to verify changes before review.",
+    "Reviewers receive notifications with diff views via email or Slack and can approve or reject with feedback.",
+    "Approved changes are merged into production branches and ClickUp statuses updated accordingly.",
+    "Rejected feedback is used to update prompts and re-queue tasks for agent retries."
+  ],
+  "validation_criteria": [
+    "Demo sites clone and apply branding correctly within 5 minutes.",
+    "Complete end-to-end task processing from ClickUp event to GitHub merge including approval.",
+    "Agent queue respects concurrency limits and state transitions between task statuses.",
+    "Secure tokens enable one-click approval links that trigger proper merging.",
+    "Rejected tasks trigger prompt updates and agent re-execution with user feedback.",
+    "Uptime monitoring reports and logs reflect accurate client site status.",
+    "Strict input validation prevents invalid slugs, hex colors, and task IDs."
+  ],
+  "code_summary": {
+    "tech_stack": [
+      "TypeScript",
+      "Node.js",
+      "Express",
+      "Axios",
+      "Playwright",
+      "Git"
+    ],
+    "features": [
+      {
+        "name": "Webhook Processing",
+        "description": "Processes incoming ClickUp webhook events and triggers relevant workflows.",
+        "files": [
+          "src/clickup/webhookHandler.ts",
+          "src/clickup/apiClient.ts"
+        ]
+      },
+      {
+        "name": "Workflow Orchestration",
+        "description": "Manages the full lifecycle of a task from import to completion, including agent triggering and approval.",
+        "files": [
+          "src/workflow/workflowOrchestrator.ts",
+          "src/state/stateManager.ts"
+        ]
+      },
+      {
+        "name": "Demo Creation",
+        "description": "Automates the creation of demo websites by cloning templates and applying branding.",
+        "files": [
+          "src/handlers/demoHandler.ts",
+          "src/git/githubCloner.ts",
+          "src/git/repoManager.ts"
+        ]
+      },
+      {
+        "name": "Cursor Agent Integration",
+        "description": "Interfaces with Cursor IDE's agent to perform automated code changes.",
+        "files": [
+          "src/cursor/workspaceManager.ts",
+          "src/cursor/agentQueue.ts",
+          "src/cursor/taskStatusManager.ts"
+        ]
+      },
+      {
+        "name": "Approval Workflow",
+        "description": "Handles human-in-the-loop approvals via email or Slack tokens.",
+        "files": [
+          "src/approval/approvalManager.ts",
+          "src/approval/emailService.ts",
+          "src/approval/slackService.ts"
+        ]
+      },
+      {
+        "name": "Reporting & Monitoring",
+        "description": "Provides uptime monitoring and generates performance/status reports.",
+        "files": [
+          "src/reports/reportRunner.ts",
+          "src/uptime/uptimeMonitor.ts",
+          "src/routes/reportRoutes.ts"
+        ]
+      },
+      {
+        "name": "Task Import",
+        "description": "Imports tasks and assets from ClickUp into the local workflow system.",
+        "files": [
+          "src/handlers/taskImportHandler.ts",
+          "src/clickup/fetchAttachments.ts"
+        ]
+      }
+    ]
+  }
+}

@@ -5,120 +5,382 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task Details - ClickUp to Cursor Workflow</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <a href="/" class="back-link">← Back to Dashboard</a>
-            <h1>Task Details</h1>
-        </header>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
 
-        <div id="loading" class="loading">Loading task details...</div>
-        <div id="error" class="error hidden"></div>
-
-        <div id="taskDetails" class="hidden">
-            <!-- Task Info Section -->
-            <section class="task-info-section">
-                <div class="task-header">
-                    <div>
-                        <h2 id="taskName"></h2>
-                        <span id="taskState" class="state-badge"></span>
-                    </div>
-                    <div class="flex gap-md flex-center">
-                        <div class="auto-refresh-indicator hidden" id="autoRefreshIndicator">
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-nav">
+                    <a href="/index.html" class="back-link" title="Back to Dashboard">
+                        <i data-lucide="arrow-left"></i>
+                    </a>
+                    <div class="header-title-wrapper">
+                        <h1>Task Details</h1>
+                        <div id="autoRefreshIndicator" class="auto-refresh-indicator hidden">
                             <div class="auto-refresh-dot"></div>
-                            <span>Auto-updating</span>
+                            <span>Live</span>
                         </div>
-                        <div class="agent-trigger-wrapper">
-                            <button id="triggerAgentBtn" class="btn btn-primary">🤖 Trigger Cursor Agent</button>
-                            <div id="agentStatus" class="agent-status-hint hidden"></div>
+                    </div>
+                </div>
+
+                <div class="header-actions">
+                    <button id="refreshTaskBtn" class="btn btn-secondary btn-icon" title="Refresh task details">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Refresh</span>
+                    </button>
+                    <div class="divider-v"></div>
+                    <div id="connectionStatus" class="connection-status hidden">
+                        <!-- Connection status here if needed -->
+                    </div>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div id="loading" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Fetching task details...</p>
+                </div>
+                
+                <div id="error" class="error-state hidden">
+                    <i data-lucide="x-circle"></i>
+                    <div id="errorMessage" class="error-message"></div>
+                    <button id="retryBtn" class="btn btn-primary">Retry</button>
+                </div>
+
+                <div id="taskDetails" class="hidden">
+                    <div class="task-grid-layout">
+                        <div class="main-column">
+                            <!-- Task Header Card (Main title + action - single source of truth) -->
+                            <section class="card task-header-card">
+                                <div class="task-header-main">
+                                    <div class="task-title-group">
+                                        <h2 id="taskName" class="task-main-title"></h2>
+                                        <span id="taskState" class="state-badge"></span>
+                                    </div>
+                                    <div class="agent-trigger-controls">
+                                        <select id="agentModelSelect" class="model-select">
+                                            <!-- Populated dynamically -->
+                                        </select>
+                                        <button id="triggerAgentBtnOverview" class="btn btn-primary">🤖 Run Agent</button>
+                                        <button id="killTaskBtn" class="btn btn-danger" title="Stop task and remove from queue">
+                                            <i data-lucide="x-octagon"></i> Kill Task
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Task Metadata Card (compact info grid) -->
+                            <section class="card metadata-card">
+                                <div class="metadata-grid">
+                                    <div class="meta-item">
+                                        <i data-lucide="hash"></i>
+                                        <div class="meta-content">
+                                            <span class="meta-label">Task ID</span>
+                                            <span class="meta-value" id="taskId"></span>
+                                        </div>
+                                    </div>
+                                    <div class="meta-item">
+                                        <i data-lucide="user"></i>
+                                        <div class="meta-content">
+                                            <span class="meta-label">Client</span>
+                                            <span class="meta-value" id="clientName"></span>
+                                        </div>
+                                    </div>
+                                    <div class="meta-item">
+                                        <i data-lucide="git-branch"></i>
+                                        <div class="meta-content">
+                                            <span class="meta-label">Branch</span>
+                                            <div class="meta-value branch-value">
+                                                <code id="branchName"></code>
+                                                <button class="copy-btn" data-copy-target="branchName" title="Copy">📋</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="meta-item">
+                                        <i data-lucide="external-link"></i>
+                                        <div class="meta-content">
+                                            <span class="meta-label">ClickUp</span>
+                                            <a id="clickUpUrl" class="clickup-link" href="#" target="_blank">View ↗</a>
+                                        </div>
+                                    </div>
+                                    <div class="meta-item">
+                                        <i data-lucide="calendar"></i>
+                                        <div class="meta-content">
+                                            <span class="meta-label">Created</span>
+                                            <span class="meta-value" id="createdAt"></span>
+                                        </div>
+                                    </div>
+                                    <div class="meta-item">
+                                        <i data-lucide="clock"></i>
+                                        <div class="meta-content">
+                                            <span class="meta-label">Updated</span>
+                                            <span class="meta-value" id="updatedAt"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Demo Progress Section (only for demo tasks) -->
+                            <section id="demoStepsContainer" class="card demo-progress-card hidden">
+                                <div class="demo-progress-header">
+                                    <i data-lucide="sparkles"></i>
+                                    <span>AI Customization Progress</span>
+                                    <span id="demoStepCounter" class="demo-step-counter">Step 1 of 4</span>
+                                </div>
+                                <div class="demo-progress-bar">
+                                    <div id="demoProgressBar" class="demo-progress-fill" style="width: 25%"></div>
+                                </div>
+                                <div class="demo-steps-row">
+                                    <div class="demo-step" data-step="1">
+                                        <div class="demo-step-dot"></div>
+                                        <span>Branding</span>
+                                    </div>
+                                    <div class="demo-step" data-step="2">
+                                        <div class="demo-step-dot"></div>
+                                        <span>Copywriting</span>
+                                    </div>
+                                    <div class="demo-step" data-step="3">
+                                        <div class="demo-step-dot"></div>
+                                        <span>Imagery</span>
+                                    </div>
+                                    <div class="demo-step" data-step="4">
+                                        <div class="demo-step-dot"></div>
+                                        <span>Review</span>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Queue Status Section (for active agent work) -->
+                            <section id="queueStatusSection" class="card queue-status-card hidden">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="activity"></i> Agent Queue Status</h3>
+                                    <span id="queueStateBadge" class="state-badge"></span>
+                                </div>
+                                <div class="queue-status-content">
+                                    <div class="progress-container">
+                                        <div id="queueProgressBar" class="progress-bar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="flex-between mt-sm">
+                                        <span id="queueCurrentStep" class="queue-step">Initializing...</span>
+                                        <span id="queuePercent" class="queue-percent">0%</span>
+                                    </div>
+                                    <div id="queueNotes" class="queue-notes mt-md"></div>
+                                </div>
+                            </section>
+                            
+                            <!-- System Prompt Section -->
+                            <section id="systemPromptSection" class="card system-prompt-card hidden">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="message-square"></i> System Prompt</h3>
+                                    <div class="flex gap-md">
+                                        <button id="copyPromptBtn" class="btn btn-secondary btn-sm">Copy Prompt</button>
+                                        <button id="editPromptBtn" class="btn btn-secondary btn-sm">Edit</button>
+                                        <button id="togglePromptBtn" class="btn btn-secondary btn-sm">Show Details</button>
+                                    </div>
+                                </div>
+                                <div id="systemPromptContent" class="prompt-content collapsed">
+                                    <pre id="systemPromptText"></pre>
+                                </div>
+                                <div id="editPromptContainer" class="hidden p-md">
+                                    <textarea id="editPromptInput" class="description-textarea" style="min-height: 400px; font-family: monospace;"></textarea>
+                                    <div class="flex gap-md mt-sm">
+                                        <button id="savePromptBtn" class="btn btn-primary btn-sm">Save Changes</button>
+                                        <button id="cancelPromptBtn" class="btn btn-secondary btn-sm">Cancel</button>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Description Section -->
+                            <section class="card description-card">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="align-left"></i> Description</h3>
+                                    <button id="editDescriptionBtn" class="btn btn-secondary btn-sm">Edit</button>
+                                </div>
+                                <div id="taskDescription" class="description-content"></div>
+                                <div id="editDescriptionContainer" class="hidden">
+                                    <textarea id="editDescriptionInput" class="description-textarea"></textarea>
+                                    <div class="flex gap-md mt-sm">
+                                        <button id="saveDescriptionBtn" class="btn btn-primary btn-sm">Save Changes</button>
+                                        <button id="cancelDescriptionBtn" class="btn btn-secondary btn-sm">Cancel</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Attachments Sub-section -->
+                                <div id="attachmentsSection" class="attachments-section hidden">
+                                    <div class="divider-h mt-md mb-md"></div>
+                                    <h4 class="flex items-center gap-sm mb-sm">
+                                        <i data-lucide="paperclip" class="size-sm"></i> 
+                                        Attachments
+                                    </h4>
+                                    <div id="attachmentsList" class="attachments-grid"></div>
+                                </div>
+                            </section>
+
+                            <!-- Visual Changes Section -->
+                            <section id="visualChangesSection" class="card visual-changes-card">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="monitor"></i> Visual Changes</h3>
+                                    <div class="screenshot-controls">
+                                        <button id="refreshScreenshotsBtn" class="btn btn-secondary btn-sm" title="Refresh screenshots">
+                                            <i data-lucide="refresh-cw"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="screenshotGalleryContainer" class="screenshot-gallery-container">
+                                    <!-- Screenshot gallery will be rendered here -->
+                                </div>
+                            </section>
+
+                            <!-- Changes Summary Section -->
+                            <section class="card changes-summary-card">
+                                <div class="card-header">
+                                    <h3><i data-lucide="bar-chart-3"></i> Changes Summary</h3>
+                                </div>
+                                <div id="changesSummary" class="changes-summary">
+                                    <div class="loading-mini">Calculating changes...</div>
+                                </div>
+                            </section>
+
+                            <!-- Diff Viewer Section -->
+                            <section class="card diff-viewer-card">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="file-code-2"></i> Code Changes</h3>
+                                    <div class="diff-controls">
+                                        <button id="downloadDiffBtn" class="btn btn-secondary btn-sm">Download .patch</button>
+                                        <button id="expandAllBtn" class="btn btn-secondary btn-sm">Expand All</button>
+                                        <button id="collapseAllBtn" class="btn btn-secondary btn-sm">Collapse All</button>
+                                    </div>
+                                </div>
+                                <div id="diffViewer" class="diff-viewer-container">
+                                    <div class="loading-mini">Loading file diffs...</div>
+                                </div>
+                            </section>
+
+                            <!-- Error Section -->
+                            <section id="errorSection" class="card error-details-card hidden">
+                                <div class="card-header">
+                                    <h3>Error Details</h3>
+                                </div>
+                                <div id="errorDetails" class="error-content"></div>
+                            </section>
                         </div>
-                        <button id="refreshTaskBtn" class="btn btn-secondary">Refresh</button>
-                    </div>
-                </div>
-                <div class="task-meta">
-                    <div class="meta-item">
-                        <strong>Task ID:</strong> <span id="taskId"></span>
-                    </div>
-                    <div class="meta-item">
-                        <strong>Client:</strong> <span id="clientName"></span>
-                    </div>
-                    <div class="meta-item">
-                        <strong>Branch:</strong> <code id="branchName"></code>
-                        <button class="copy-btn" data-copy-target="branchName" title="Copy branch name">📋</button>
-                    </div>
-                    <div class="meta-item">
-                        <strong>ClickUp:</strong> <a id="clickUpUrl" href="#" target="_blank">View in ClickUp</a>
-                    </div>
-                    <div class="meta-item">
-                        <strong>Created:</strong> <span id="createdAt"></span>
-                    </div>
-                    <div class="meta-item">
-                        <strong>Updated:</strong> <span id="updatedAt"></span>
-                    </div>
-                </div>
-            </section>
 
-            <!-- Progress Timeline Section -->
-            <section id="timelineSection" class="task-description-section hidden">
-                <h3>Workflow Progress</h3>
-                <div id="timeline" class="timeline"></div>
-            </section>
+                        <div class="side-column">
+                            <!-- Progress Timeline Section -->
+                            <section id="timelineSection" class="card timeline-card">
+                                <div class="card-header">
+                                    <h3><i data-lucide="git-pull-request"></i> Workflow Progress</h3>
+                                </div>
+                                <div id="timeline" class="modern-timeline"></div>
+                            </section>
 
-            <!-- Description Section -->
-            <section class="task-description-section">
-                <div class="flex flex-between flex-center mb-sm">
-                    <h3>Description</h3>
-                    <button id="editDescriptionBtn" class="btn btn-secondary btn-sm">Edit Description</button>
-                </div>
-                <div id="taskDescription" class="description-content"></div>
-                <div id="editDescriptionContainer" class="hidden">
-                    <textarea id="editDescriptionInput" class="description-textarea"></textarea>
-                    <div class="flex gap-md mt-sm">
-                        <button id="saveDescriptionBtn" class="btn btn-primary btn-sm">Save</button>
-                        <button id="cancelDescriptionBtn" class="btn btn-secondary btn-sm">Cancel</button>
+                            <!-- Approval Card -->
+                            <section id="approvalSection" class="card approval-card hidden">
+                                <div class="card-header">
+                                    <h3><i data-lucide="alert-circle"></i> Action Required</h3>
+                                </div>
+                                <div class="p-xl">
+                                    <p class="mb-lg">A build is ready for your review. Please examine the changes and either approve them for deployment or reject with feedback.</p>
+                                    <div class="approval-actions-vertical">
+                                        <button id="approveBtn" class="btn btn-success btn-lg w-full">
+                                            <i data-lucide="check-circle"></i> Approve Changes
+                                        </button>
+                                        <button id="rejectBtn" class="btn btn-danger btn-lg w-full">
+                                            <i data-lucide="x-circle"></i> Reject Changes
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Agent Feedback Card -->
+                            <section id="agentFeedbackSection" class="card feedback-card">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="message-circle"></i> Agent Feedback</h3>
+                                    <button id="toggleFeedbackHistoryBtn" class="btn btn-secondary btn-sm">History</button>
+                                </div>
+                                <div class="feedback-content p-md">
+                                    <p class="feedback-hint mb-md">Send feedback to guide the agent on future runs. Your feedback will be applied the next time the agent processes this task.</p>
+                                    <textarea id="agentFeedbackInput" class="feedback-textarea" placeholder="Enter your feedback for the agent..." rows="4"></textarea>
+                                    <div class="feedback-options mt-sm">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="applyOnNextRunCheckbox" checked>
+                                            <span>Apply on next run</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="triggerRerunCheckbox">
+                                            <span>Trigger rerun immediately</span>
+                                        </label>
+                                    </div>
+                                    <div class="feedback-actions mt-md">
+                                        <button id="submitFeedbackBtn" class="btn btn-primary w-full" disabled>
+                                            <i data-lucide="send"></i> Submit Feedback
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="feedbackHistoryContainer" class="feedback-history collapsed">
+                                    <div class="feedback-history-header">
+                                        <h4>Feedback History</h4>
+                                        <span id="feedbackHistoryCount" class="badge">0</span>
+                                    </div>
+                                    <div id="feedbackHistoryList" class="feedback-history-list">
+                                        <p class="no-feedback">No feedback submitted yet</p>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
                     </div>
                 </div>
-            </section>
-
-            <!-- Changes Summary Section -->
-            <section class="changes-summary-section">
-                <h3>Changes Summary</h3>
-                <div id="changesSummary" class="changes-summary">
-                    <div class="loading">Loading changes...</div>
-                </div>
-            </section>
-
-            <!-- Diff Viewer Section -->
-            <section class="diff-viewer-section">
-                <div class="diff-header">
-                    <h3>Code Changes</h3>
-                    <div class="diff-controls">
-                        <button id="downloadDiffBtn" class="btn btn-secondary">Download Patch</button>
-                        <button id="expandAllBtn" class="btn btn-secondary">Expand All</button>
-                        <button id="collapseAllBtn" class="btn btn-secondary">Collapse All</button>
-                    </div>
-                </div>
-                <div id="diffViewer" class="diff-viewer">
-                    <div class="loading">Loading diff...</div>
-                </div>
-            </section>
-
-            <!-- Approval Section -->
-            <section id="approvalSection" class="approval-section hidden">
-                <h3>Approval</h3>
-                <div class="approval-actions">
-                    <button id="approveBtn" class="btn btn-success">✅ Approve Changes</button>
-                    <button id="rejectBtn" class="btn btn-danger">❌ Reject Changes</button>
-                </div>
-            </section>
-
-            <!-- Error Section -->
-            <section id="errorSection" class="task-description-section hidden">
-                <h3>Error Details</h3>
-                <div id="errorDetails" class="description-content error-content"></div>
-            </section>
-        </div>
+                <button id="scrollToTopBtn" class="scroll-to-top hidden" title="Scroll to top">↑</button>
+            </div>
+        </main>
     </div>
 
     <!-- Approval Modal -->
@@ -156,10 +418,34 @@
         </div>
     </div>
 
+    <!-- Model Error Modal -->
+    <div id="modelErrorModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Model Unavailable</h3>
+                <button class="modal-close" id="closeModelErrorModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>The selected model <strong id="failedModelName"></strong> is not available.</p>
+                <p>Please select a different model:</p>
+                <select id="retryModelSelect" class="modal-input">
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelModelRetry" class="btn btn-secondary">Cancel</button>
+                <button id="confirmModelRetry" class="btn btn-primary">Retry with Selected Model</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
     <script src="utils/api.js"></script>
     <script src="utils/notifications.js"></script>
     <script src="utils/formatting.js"></script>
     <script src="utils/diff.js"></script>
+    <script src="utils/screenshot-gallery.js"></script>
     <script src="task.js"></script>
 </body>
 </html>
