@@ -25,6 +25,7 @@ state/
 downloads/
 temp-uploads/
 backups/
+client-websites/
 
 # Cursor Agent Queue & Artifacts
 .cursor/queue/
