@@ -237,6 +237,18 @@ async function verifyCursorAgentAuth(binaryPath: string): Promise<{ isAuthentica
     });
 }
 
+/**
+ * Recovery context for error handling
+ */
+export interface RecoveryContext {
+    canRetry: boolean;
+    canSkip: boolean;
+    suggestedAction: 'retry' | 'skip' | 'wait' | 'abort';
+    estimatedCreditResetTime?: string;
+    retryAfterMs?: number;
+    userGuidance?: string;
+}
+
 export interface RunResult {
     exitCode: number | null;
     signal: NodeJS.Signals | null;
@@ -246,6 +258,10 @@ export interface RunResult {
     error?: string;
     modelError?: boolean;
     failedModel?: string;
+    creditError?: boolean;
+    errorCategory?: 'credit_limit' | 'model_error' | 'auth_error' | 'network_error' | 'timeout' | 'unknown';
+    // Recovery context for frontend error handling
+    recoveryContext?: RecoveryContext;
 }
 
 export interface RunnerCallbacks {
@@ -253,6 +269,66 @@ export interface RunnerCallbacks {
     onStderr?: (line: string) => void;
     onExit?: (exitCode: number | null, signal: NodeJS.Signals | null) => void;
     onRawLine?: (line: string) => void;
+}
+
+/**
+ * Generates recovery context based on error category.
+ * Provides guidance for the frontend on how to handle errors.
+ */
+function getRecoveryContextForError(errorCategory?: string): RecoveryContext {
+    switch (errorCategory) {
+        case 'credit_limit':
+            // FIX: Don't provide misleading time estimates without actual Cursor API integration
+            return {
+                canRetry: false,
+                canSkip: false,
+                suggestedAction: 'wait',
+                // estimatedCreditResetTime intentionally omitted - would need Cursor API for accurate info
+                userGuidance: 'AI credits are exhausted. Please wait for your credits to reset or upgrade your plan.'
+            };
+            
+        case 'model_error':
+            return {
+                canRetry: true,
+                canSkip: false,
+                suggestedAction: 'retry',
+                retryAfterMs: 30000, // Wait 30 seconds
+                userGuidance: 'The AI model is temporarily unavailable. Try again in a moment.'
+            };
+            
+        case 'auth_error':
+            return {
+                canRetry: false,
+                canSkip: false,
+                suggestedAction: 'abort',
+                userGuidance: 'Authentication failed. Please check your Cursor agent login status.'
+            };
+            
+        case 'network_error':
+            return {
+                canRetry: true,
+                canSkip: false,
+                suggestedAction: 'retry',
+                retryAfterMs: 5000, // Wait 5 seconds
+                userGuidance: 'A network error occurred. Check your connection and try again.'
+            };
+            
+        case 'timeout':
+            return {
+                canRetry: true,
+                canSkip: true,
+                suggestedAction: 'retry',
+                userGuidance: 'The operation timed out. You can retry or skip to the next step.'
+            };
+            
+        default:
+            return {
+                canRetry: true,
+                canSkip: true,
+                suggestedAction: 'retry',
+                userGuidance: 'An unexpected error occurred. You can retry or skip this step.'
+            };
+    }
 }
 
 export interface CursorRunnerOptions {
@@ -635,6 +711,8 @@ export class CursorCliRunner extends EventEmitter {
 
                 let stdoutRemainder = '';
                 let lastOutputTime = Date.now();
+                let accumulatedStderr = ''; // Accumulate stderr for better error detection
+                let detectedCreditError = false;
                 
                 // Heartbeat monitor: disabled to avoid race conditions with agent
                 // agent handles its own heartbeat and status updates
@@ -689,6 +767,18 @@ export class CursorCliRunner extends EventEmitter {
                     const chunk = data.toString();
                     logger.debug(`[Agent Stderr Chunk] [${taskId}] ${chunk.length} bytes received`);
                     logStream.write(`STDERR: ${chunk}`);
+                    accumulatedStderr += chunk;
+                    
+                    // Real-time detection of critical errors (credit limit, auth issues)
+                    if (/usage.?limit|credit|out of credits|quota.?(exceed|limit)/i.test(chunk)) {
+                        detectedCreditError = true;
+                        logger.error(`[CREDIT ERROR DETECTED] [${taskId}] ${chunk.trim()}`);
+                        await this.statusManager.updateStatus(taskId, {
+                            state: 'FAILED',
+                            step: 'Credit limit reached',
+                            error: 'AI credits exhausted. Please wait for credits to reset or upgrade your plan.'
+                        });
+                    }
                     
                     const lines = chunk.split('\n');
                     for (const line of lines) {
@@ -735,23 +825,78 @@ export class CursorCliRunner extends EventEmitter {
                         error = 'Process cancelled';
                         logger.warn(`Task ${taskId} was cancelled.`);
                     } else if (code !== 0 && code !== null) {
-                        result.error = `Process exited with non-zero code: ${code}`;
+                        // Try to extract a better error message from accumulated stderr
+                        let detailedError = `Process exited with non-zero code: ${code}`;
+                        
+                        // Check for credit/usage errors in accumulated output
+                        if (detectedCreditError || /usage.?limit|credit|out of credits|quota/i.test(accumulatedStderr)) {
+                            detailedError = 'AI credits exhausted. Please wait for credits to reset or upgrade your plan.';
+                            result.creditError = true;
+                            result.errorCategory = 'credit_limit';
+                        } else if (/auth|login|token.*invalid|unauthorized/i.test(accumulatedStderr)) {
+                            detailedError = 'AI agent authentication failed. Please re-authenticate.';
+                            result.errorCategory = 'auth_error';
+                        } else if (/model.*not available|model.*unavailable/i.test(accumulatedStderr)) {
+                            detailedError = `Model unavailable: ${this.options.model || 'default'}`;
+                            result.modelError = true;
+                            result.errorCategory = 'model_error';
+                        } else if (accumulatedStderr.length > 0) {
+                            // Use last meaningful line from stderr as error
+                            const stderrLines = accumulatedStderr.trim().split('\n').filter(l => l.trim());
+                            if (stderrLines.length > 0) {
+                                const lastLine = stderrLines[stderrLines.length - 1].trim();
+                                if (lastLine.length < 200) {
+                                    detailedError = lastLine;
+                                }
+                            }
+                        }
+                        
+                        result.error = detailedError;
                         state = 'FAILED';
                         error = result.error;
-                        logger.error(`Task ${taskId} failed with exit code ${code}. Check agent logs for details.`);
+                        logger.error(`Task ${taskId} failed with exit code ${code}: ${detailedError}`);
                     } else if (code === 0) {
                         logger.info(`Task ${taskId} finished successfully (code 0).`);
                     }
 
-                    // Detect model-specific errors for frontend handling
-                    if (result.error && (
-                        result.error.toLowerCase().includes('model') ||
-                        result.error.includes('unavailable') ||
-                        result.error.includes('not supported')
-                    )) {
-                        result.modelError = true;
-                        result.failedModel = this.options.model;
-                        logger.warn(`Model error detected for task ${taskId}: ${result.failedModel}`);
+                    // Detect and categorize errors for frontend handling
+                    if (result.error) {
+                        const errorLower = result.error.toLowerCase();
+                        
+                        // Credit/usage limit errors - highest priority detection
+                        if (/usage.?limit|credit|out of credits|quota.?(exceed|limit)|billing|subscription/i.test(result.error)) {
+                            result.creditError = true;
+                            result.errorCategory = 'credit_limit';
+                            logger.error(`CREDIT LIMIT ERROR for task ${taskId}: ${result.error}`);
+                        }
+                        // Model-specific errors
+                        else if (errorLower.includes('model') || errorLower.includes('unavailable') || errorLower.includes('not supported')) {
+                            result.modelError = true;
+                            result.failedModel = this.options.model;
+                            result.errorCategory = 'model_error';
+                            logger.warn(`Model error detected for task ${taskId}: ${result.failedModel}`);
+                        }
+                        // Authentication errors
+                        else if (/auth|login|token.*invalid|unauthorized|not authenticated/i.test(result.error)) {
+                            result.errorCategory = 'auth_error';
+                            logger.error(`Authentication error for task ${taskId}: ${result.error}`);
+                        }
+                        // Network errors
+                        else if (/network|connection|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(result.error)) {
+                            result.errorCategory = 'network_error';
+                            logger.error(`Network error for task ${taskId}: ${result.error}`);
+                        }
+                        // Timeout
+                        else if (/timeout|timed out/i.test(result.error)) {
+                            result.errorCategory = 'timeout';
+                            logger.warn(`Timeout error for task ${taskId}: ${result.error}`);
+                        }
+                        else {
+                            result.errorCategory = 'unknown';
+                        }
+                        
+                        // **NEW**: Add recovery context based on error category
+                        result.recoveryContext = getRecoveryContextForError(result.errorCategory);
                     }
 
                     await this.statusManager.updateStatus(taskId, {

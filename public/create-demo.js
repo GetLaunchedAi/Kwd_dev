@@ -260,7 +260,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Slug check failed:', error);
-            // Don't block on network error, server will validate anyway
+            // FIX: Show warning on network error - server will validate, but user should be aware
+            showSlugFeedback('⚠ Could not verify availability (network error). Server will validate on submit.', 'warning');
             return true;
         }
     }
@@ -268,7 +269,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function showSlugFeedback(message, type) {
         if (!slugFeedback) return;
         slugFeedback.textContent = message;
-        slugFeedback.className = 'text-hint ' + (type === 'error' ? 'error-text' : (type === 'success' ? 'success-text' : ''));
+        // FIX: Added 'warning' type support for network errors
+        const typeClass = type === 'error' ? 'error-text' : 
+                         type === 'success' ? 'success-text' : 
+                         type === 'warning' ? 'warning-text' : '';
+        slugFeedback.className = 'text-hint ' + typeClass;
     }
 
     let slugTimeout;
@@ -332,11 +337,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (response.ok) {
                     const status = await response.json();
                     
-                    // Only resume if demo is still in progress
-                    if (status.state === 'completed' || status.state === 'failed') {
-                        console.log(`Demo ${activeDemoSlug} already finished. Clearing resumption state.`);
+                    // Handle completed demos
+                    if (status.state === 'completed') {
+                        console.log(`Demo ${activeDemoSlug} already completed. Clearing resumption state.`);
                         localStorage.removeItem('activeDemoSlug');
                         sessionStorage.removeItem(`demo-progress-${activeDemoSlug}`);
+                        return;
+                    }
+                    
+                    // FIX: Handle failed demos with error message
+                    if (status.state === 'failed') {
+                        console.log(`Demo ${activeDemoSlug} failed. Clearing resumption state.`);
+                        localStorage.removeItem('activeDemoSlug');
+                        sessionStorage.removeItem(`demo-progress-${activeDemoSlug}`);
+                        // Show error notification with the failure message
+                        if (window.notifications && status.message) {
+                            notifications.error(`Previous demo creation failed: ${status.message}`);
+                        }
                         return;
                     }
                     
@@ -502,8 +519,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     pollInterval = null;
                     pollingStartTime = null;
                     localStorage.removeItem('activeDemoSlug');
+                    // Clear sessionStorage for this demo
+                    sessionStorage.removeItem(`demo-progress-${slug}`);
                     formContainer.classList.remove('hidden');
                     progressContainer.classList.add('hidden');
+                    // FIX: Show notification to user that demo was not found
+                    if (window.notifications) {
+                        notifications.warning('Demo session not found. It may have been deleted or failed early. Please try creating a new demo.');
+                    }
                     return;
                 }
 
@@ -990,13 +1013,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    // FIX: Add global flag to prevent double-clicks on approval actions
+    let approvalInProgress = false;
+    
     // 1. Approve & Publish - Accept the AI's work and publish to GitHub
     async function approveAndPublish() {
         const card = document.getElementById('approvePublishCard');
         if (!card || !currentClientSlug) return;
         
+        // FIX: Prevent double-clicks with flag check
+        if (approvalInProgress) {
+            console.log('Approval already in progress, ignoring duplicate click');
+            return;
+        }
+        approvalInProgress = true;
+        
+        // Store original content for restoration
+        const actionTitle = card.querySelector('.action-title');
+        const originalTitle = actionTitle ? actionTitle.textContent : '';
+        
         card.style.pointerEvents = 'none';
         card.style.opacity = '0.7';
+        card.classList.add('loading');
+        if (actionTitle) actionTitle.textContent = 'Publishing...';
         
         try {
             const taskId = `demo-${currentClientSlug}`;
@@ -1038,8 +1077,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showNotification(`Failed to approve: ${error.message}`, 'error');
             }
         } finally {
+            approvalInProgress = false;
             card.style.pointerEvents = '';
             card.style.opacity = '';
+            card.classList.remove('loading');
+            if (actionTitle) actionTitle.textContent = originalTitle;
         }
     }
     
@@ -1068,6 +1110,13 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const btn = document.getElementById('submitChangesBtn');
         if (!btn || !currentClientSlug) return;
+        
+        // FIX: Prevent double-clicks across all approval actions
+        if (approvalInProgress) {
+            console.log('Approval action already in progress, ignoring');
+            return;
+        }
+        approvalInProgress = true;
         
         btn.disabled = true;
         const originalContent = btn.innerHTML;
@@ -1116,6 +1165,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showNotification(`Failed to send feedback: ${error.message}`, 'error');
             }
         } finally {
+            approvalInProgress = false;
             btn.disabled = false;
             btn.innerHTML = originalContent;
             lucide.createIcons();
@@ -1131,6 +1181,13 @@ document.addEventListener('DOMContentLoaded', () => {
     async function confirmRejectDemo() {
         const btn = document.getElementById('confirmRejectBtn');
         if (!btn || !currentClientSlug) return;
+        
+        // FIX: Prevent double-clicks across all approval actions
+        if (approvalInProgress) {
+            console.log('Approval action already in progress, ignoring');
+            return;
+        }
+        approvalInProgress = true;
         
         btn.disabled = true;
         const originalContent = btn.innerHTML;
@@ -1170,6 +1227,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showNotification(`Failed to reject demo: ${error.message}`, 'error');
             }
         } finally {
+            approvalInProgress = false;
             btn.disabled = false;
             btn.innerHTML = originalContent;
             lucide.createIcons();

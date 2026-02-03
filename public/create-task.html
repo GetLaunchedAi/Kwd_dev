@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Local Task - KWD Dev</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="light-theme">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">KWD Dev</span>
+                </div>
+                <div id="connectionStatus" class="connection-status">
+                    <span class="status-indicator status-offline" id="statusIndicator"></span>
+                    <span id="statusText">Offline</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/index.html" class="nav-item">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/create-task.html" class="nav-item active">
+                    <i data-lucide="file-plus"></i>
+                    <span>Create Task</span>
+                </a>
+                <a href="/create-demo.html" class="nav-item">
+                    <i data-lucide="plus-square"></i>
+                    <span>Create Demo</span>
+                </a>
+                <a href="/clients.html" class="nav-item">
+                    <i data-lucide="users"></i>
+                    <span>Clients</span>
+                </a>
+                <a href="/reports.html" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="/mappings.html" class="nav-item">
+                    <i data-lucide="map"></i>
+                    <span>Mappings</span>
+                </a>
+                <a href="/settings.html" class="nav-item">
+                    <i data-lucide="settings"></i>
+                    <span>Settings</span>
+                </a>
+                <a href="/troubleshooting.html" class="nav-item">
+                    <i data-lucide="help-circle"></i>
+                    <span>Troubleshooting</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle-btn">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                    <span>Light Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-title">
+                    <h1>Create Local Task</h1>
+                </div>
+                <div class="header-actions">
+                    <a href="/index.html" class="btn btn-secondary btn-sm">
+                        <i data-lucide="arrow-left"></i>
+                        <span>Back to Dashboard</span>
+                    </a>
+                </div>
+            </header>
+
+            <div class="content-container">
+                <div class="form-container card">
+                    <div class="card-header">
+                        <h3><i data-lucide="file-plus"></i> New Task</h3>
+                        <p class="text-hint">Create a task locally without importing from ClickUp. This task will be stored in the same structure as imported tasks.</p>
+                    </div>
+
+                    <form id="createTaskForm">
+                        <div class="form-section">
+                            <div class="section-title">
+                                <i data-lucide="file-text"></i>
+                                <h3>Task Details</h3>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="taskTitle">Task Title *</label>
+                                <div class="input-wrapper">
+                                    <i data-lucide="type"></i>
+                                    <input type="text" id="taskTitle" name="taskTitle" required 
+                                           placeholder="e.g. Update hero section styling" 
+                                           maxlength="200">
+                                </div>
+                                <small class="text-hint">A brief, descriptive title for the task (max 200 characters)</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="taskDescription">Description *</label>
+                                <div class="input-wrapper">
+                                    <i data-lucide="align-left"></i>
+                                    <textarea id="taskDescription" name="taskDescription" required 
+                                              placeholder="Describe what needs to be done in detail..."
+                                              rows="6"
+                                              maxlength="5000"></textarea>
+                                </div>
+                                <small class="text-hint">Provide detailed instructions for the AI agent (max 5000 characters)</small>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="section-title">
+                                <i data-lucide="users"></i>
+                                <h3>Client Assignment</h3>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="clientSelect">Client *</label>
+                                <div class="input-wrapper">
+                                    <i data-lucide="folder"></i>
+                                    <select id="clientSelect" name="clientName" required>
+                                        <option value="">Select a client...</option>
+                                        <!-- Populated dynamically -->
+                                    </select>
+                                </div>
+                                <small class="text-hint">Select the client folder where this task will be stored</small>
+                                <div id="noClientsMessage" class="alert alert-warning hidden mt-sm">
+                                    <i data-lucide="alert-circle"></i>
+                                    <span>No clients found. <a href="/clients.html">Add a client</a> first, or import a task from ClickUp.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="section-title">
+                                <i data-lucide="cpu"></i>
+                                <h3>AI Configuration</h3>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="modelSelect">AI Model</label>
+                                <div class="input-wrapper">
+                                    <i data-lucide="bot"></i>
+                                    <select id="modelSelect" name="model">
+                                        <option value="">Use Default</option>
+                                        <!-- Populated dynamically -->
+                                    </select>
+                                </div>
+                                <small class="text-hint">Optional: Select a specific AI model for this task</small>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="button" id="cancelBtn" class="btn btn-secondary btn-lg">
+                                <i data-lucide="x"></i>
+                                <span>Cancel</span>
+                            </button>
+                            <button type="submit" id="submitBtn" class="btn btn-primary btn-lg" disabled>
+                                <i data-lucide="plus"></i>
+                                <span>Create Task</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Success Section (Initially Hidden) -->
+                <div id="successContainer" class="card hidden">
+                    <div class="success-banner">
+                        <div class="success-icon">
+                            <i data-lucide="check-circle"></i>
+                        </div>
+                        <div class="success-text">
+                            <h3>Task Created Successfully!</h3>
+                            <p id="successMessage">Your task has been created and is ready for processing.</p>
+                        </div>
+                    </div>
+                    <div class="success-buttons">
+                        <button id="viewTaskBtn" class="btn btn-primary btn-lg">
+                            <i data-lucide="eye"></i>
+                            <span>View Task</span>
+                        </button>
+                        <button id="triggerAgentBtn" class="btn btn-success btn-lg">
+                            <i data-lucide="bot"></i>
+                            <span>Run Agent Now</span>
+                        </button>
+                        <button id="createAnotherBtn" class="btn btn-secondary btn-lg">
+                            <i data-lucide="plus"></i>
+                            <span>Create Another</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="utils/theme.js"></script>
+    <script src="utils/api.js"></script>
+    <script src="utils/notifications.js"></script>
+    <script src="create-task.js"></script>
+</body>
+</html>

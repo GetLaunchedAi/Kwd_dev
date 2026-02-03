@@ -72,6 +72,84 @@ class NotificationManager {
         return this.show(message, 'warning', duration);
     }
 
+    /**
+     * Shows a recoverable error notification with action buttons.
+     * Does not auto-dismiss - requires user action.
+     * @param {string} message - The error message
+     * @param {Array} actions - Array of action objects: { label, onClick, className }
+     * @param {string} type - Notification type (default: 'error')
+     * @returns {HTMLElement} The notification element
+     */
+    recoverable(message, actions = [], type = 'error') {
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type} notification-recoverable`;
+        
+        const icon = this.getIcon(type);
+        
+        // Build actions HTML
+        const actionsHtml = actions.map(action => {
+            const className = action.className || 'notification-action-btn';
+            return `<button class="${className}" data-action="${action.label}">${this.escapeHtml(action.label)}</button>`;
+        }).join('');
+        
+        notification.innerHTML = `
+            <span class="notification-icon">${icon}</span>
+            <div class="notification-content">
+                <span class="notification-message">${this.escapeHtml(message)}</span>
+                ${actions.length > 0 ? `<div class="notification-actions">${actionsHtml}</div>` : ''}
+            </div>
+            <button class="notification-close" aria-label="Close">&times;</button>
+        `;
+
+        this.container.appendChild(notification);
+
+        // Trigger animation
+        setTimeout(() => {
+            notification.classList.add('show');
+            // No auto-dismiss class - requires user action
+        }, 10);
+
+        // Close button handler
+        const closeBtn = notification.querySelector('.notification-close');
+        closeBtn.addEventListener('click', () => {
+            this.remove(notification);
+        });
+
+        // Action button handlers
+        actions.forEach(action => {
+            const btn = notification.querySelector(`[data-action="${action.label}"]`);
+            if (btn && action.onClick) {
+                btn.addEventListener('click', () => {
+                    action.onClick();
+                    if (!action.keepOpen) {
+                        this.remove(notification);
+                    }
+                });
+            }
+        });
+
+        return notification;
+    }
+
+    /**
+     * Shows a credit error notification with retry options
+     */
+    creditError(message, onRetry, onWait) {
+        return this.recoverable(message, [
+            { label: 'Retry Now', onClick: onRetry, className: 'notification-action-btn primary' },
+            { label: 'Wait', onClick: onWait, className: 'notification-action-btn secondary' }
+        ], 'error');
+    }
+
+    /**
+     * Shows a network error notification with auto-retry option
+     */
+    networkError(message, onRetry) {
+        return this.recoverable(message, [
+            { label: 'Retry', onClick: onRetry, className: 'notification-action-btn primary' }
+        ], 'warning');
+    }
+
     remove(notification) {
         notification.classList.remove('show');
         notification.classList.add('hide');

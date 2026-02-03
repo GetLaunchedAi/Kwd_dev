@@ -25,8 +25,18 @@ import {
   saveTaskState,
   loadTaskState,
   loadTaskInfo,
-  rejectTask
+  rejectTask,
+  saveStepCheckpoint,
+  markStepFailed,
+  clearFailedStepMarker,
+  acquireRetryLock,
+  releaseRetryLock,
+  getRecoveryState,
+  updateTaskState
 } from '../state/stateManager';
+import { createCheckpoint, findRecoveryCheckpoint } from '../state/checkpointService';
+import { rollbackToCheckpoint, skipFailedStep, generateRollbackPreview } from '../git/rollbackService';
+import { getCurrentCommitHash } from '../git/branchManager';
 import { ClickUpTask, clickUpApiClient } from '../clickup/apiClient';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
@@ -78,10 +88,26 @@ export async function processTask(task: ClickUpTask): Promise<void> {
     }
 
     // Step 2.6: Take initial screenshots before any changes
+    let appStarted = false;
     try {
       logger.info(`Taking initial screenshots for task ${taskId}`);
       await updateWorkflowState(clientFolder, taskId, WorkflowState.PENDING, undefined, 'Taking initial screenshots');
       const url = await visualTester.startApp(clientFolder);
+      appStarted = true;
+      
+      // Wait for app to fully initialize (warmup delay)
+      logger.info(`Waiting for app warmup before screenshots...`);
+      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second warmup
+      
+      // Verify app is responding (with error protection)
+      try {
+        const healthCheck = await visualTester.performHealthCheck(url);
+        if (healthCheck.errors.length > 0) {
+          logger.warn(`App health check found ${healthCheck.errors.length} issues, but continuing with screenshots`);
+        }
+      } catch (healthError: any) {
+        logger.warn(`Health check failed: ${healthError.message}, but continuing with screenshots`);
+      }
       
       // Use comprehensive site screenshots if enabled, otherwise fallback to simple mode
       const useFullScreenshots = config.screenshots?.fullSiteCapture ?? true;
@@ -91,7 +117,7 @@ export async function processTask(task: ClickUpTask): Promise<void> {
         screenshotResult = await visualTester.takeSiteScreenshots(url, taskId, 'before', 0, {
           maxPages: config.screenshots?.maxPages ?? 20,
           captureSections: config.screenshots?.captureSections ?? true
-        });
+        }, clientFolder);
       }
       
       // Fallback to simple screenshots if full capture failed or is disabled
@@ -99,15 +125,26 @@ export async function processTask(task: ClickUpTask): Promise<void> {
         ? [`/screenshots/${taskId}/before_0/home/__fullpage.png`]
         : await visualTester.takeScreenshots(url, taskId, 'before');
       
-      await visualTester.stopApp(clientFolder);
-      
       // Save screenshot info to state
       await updateWorkflowState(clientFolder, taskId, WorkflowState.PENDING, {
         initialScreenshots: screenshots,
         screenshotManifest: screenshotResult?.manifestPath
       });
     } catch (screenshotError: any) {
-      logger.warn(`Could not take initial screenshots: ${screenshotError.message}`);
+      logger.error(`Failed to capture before screenshots: ${screenshotError.message}`);
+      await updateWorkflowState(clientFolder, taskId, WorkflowState.PENDING, {
+        screenshotError: screenshotError.message,
+        screenshotSkipped: true
+      }).catch(() => {}); // Don't fail if state update fails
+    } finally {
+      // Always stop the app to prevent resource leaks
+      if (appStarted) {
+        try {
+          await visualTester.stopApp(clientFolder);
+        } catch (stopError: any) {
+          logger.warn(`Failed to stop app after before screenshots: ${stopError.message}`);
+        }
+      }
     }
 
     // Auto-save successful mapping for future use (if not already manually mapped)
@@ -155,6 +192,23 @@ export async function processTask(task: ClickUpTask): Promise<void> {
 
   } catch (error: any) {
     logger.error(`Error processing task ${taskId}: ${error.message}`);
+    
+    // Categorize the error for better reporting
+    const errorInfo: Record<string, any> = { error: error.message };
+    
+    if (error.creditError || /usage.?limit|credit|quota/i.test(error.message)) {
+      errorInfo.creditError = true;
+      errorInfo.errorCategory = 'credit_limit';
+      errorInfo.userMessage = 'AI credits exhausted. Please wait for credits to reset.';
+    } else if (error.modelError || /model.*unavailable/i.test(error.message)) {
+      errorInfo.modelError = true;
+      errorInfo.errorCategory = 'model_error';
+    } else if (/auth|unauthorized|not authenticated/i.test(error.message)) {
+      errorInfo.errorCategory = 'auth_error';
+    } else if (/ECONNREFUSED|ENOTFOUND|network/i.test(error.message)) {
+      errorInfo.errorCategory = 'network_error';
+    }
+    
     // Try to update state to error
     try {
       if (clientFolder) {
@@ -162,7 +216,7 @@ export async function processTask(task: ClickUpTask): Promise<void> {
           clientFolder,
           taskId,
           WorkflowState.ERROR,
-          { error: error.message }
+          errorInfo
         );
       } else {
         // Fallback: try to extract it again if not already found
@@ -174,7 +228,7 @@ export async function processTask(task: ClickUpTask): Promise<void> {
               clientFolderInfo.path,
               taskId,
               WorkflowState.ERROR,
-              { error: error.message }
+              errorInfo
             );
           }
         }
@@ -303,7 +357,10 @@ async function _continueWorkflowAfterAgentInternal(
   // CRITICAL: Distinguish between the current run ID and the external parent Task ID (ClickUp)
   const taskId = runInfo?.taskId || runId;
   const branchName = state.branchName;
-  const assigneeEmail = runInfo?.task?.assignees?.[0]?.email;
+  
+  // ISSUE 6 FIX: Get assignee email from task, or fall back to notificationEmail for local tasks
+  // Local tasks don't have ClickUp assignees, but may have a notificationEmail configured
+  const assigneeEmail = runInfo?.task?.assignees?.[0]?.email || runInfo?.notificationEmail;
   const iterationBase = state.revisions?.length || 0;
   let iteration = iterationBase;
 
@@ -330,10 +387,26 @@ async function _continueWorkflowAfterAgentInternal(
   let screenshotCaptureSuccess = false;
   let screenshotError: string | undefined;
   
+  let appStartedForAfter = false;
   try {
     // Take "after" screenshots for this step
     logger.info(`Taking artifacts for task ${taskId} (Iteration ${iteration}, runId ${runId})`);
     const url = await visualTester.startApp(clientFolder);
+    appStartedForAfter = true;
+    
+    // Wait for app to fully initialize (warmup delay) - Phase 2 enhancement
+    logger.info(`Waiting for app warmup before after screenshots...`);
+    await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second warmup
+    
+    // Verify app is responding (with error protection) - Phase 2 enhancement
+    try {
+      const healthCheck = await visualTester.performHealthCheck(url);
+      if (healthCheck.errors.length > 0) {
+        logger.warn(`App health check found ${healthCheck.errors.length} issues, but continuing with after screenshots`);
+      }
+    } catch (healthError: any) {
+      logger.warn(`Health check failed: ${healthError.message}, but continuing with after screenshots`);
+    }
     
     // Use comprehensive site screenshots if enabled
     const useFullScreenshots = config.screenshots?.fullSiteCapture ?? true;
@@ -344,7 +417,7 @@ async function _continueWorkflowAfterAgentInternal(
       screenshotResult = await visualTester.takeSiteScreenshots(url, taskId, 'after', iteration, {
         maxPages: config.screenshots?.maxPages ?? 20,
         captureSections: config.screenshots?.captureSections ?? true
-      });
+      }, clientFolder);
       
       // ISSUE 2 FIX: Check if screenshots were actually captured
       if (screenshotResult) {
@@ -367,8 +440,6 @@ async function _continueWorkflowAfterAgentInternal(
         screenshotCaptureSuccess = true;
       }
     }
-    
-    await visualTester.stopApp(clientFolder);
     
     // Save diff artifact
     const baseCommit = state.baseCommitHash || 'HEAD~1';
@@ -396,6 +467,15 @@ async function _continueWorkflowAfterAgentInternal(
       screenshotCaptureSuccess: false,
       screenshotError: artifactError.message
     }).catch(() => {}); // Don't fail if state update fails
+  } finally {
+    // Always stop the app to prevent resource leaks
+    if (appStartedForAfter) {
+      try {
+        await visualTester.stopApp(clientFolder);
+      } catch (stopError: any) {
+        logger.warn(`Failed to stop app after after screenshots: ${stopError.message}`);
+      }
+    }
   }
 
   // 3. Handle multi-step demo customization transitions
@@ -406,7 +486,27 @@ async function _continueWorkflowAfterAgentInternal(
       let completedStep = 1;
       const stepMatch = runId.match(/-step(\d+)$/);
       if (stepMatch) {
-        completedStep = parseInt(stepMatch[1], 10);
+        const parsedStep = parseInt(stepMatch[1], 10);
+        // FIX: Validate the extracted step number is valid (1-4 for typical demos)
+        if (!isNaN(parsedStep) && parsedStep >= 1 && parsedStep <= 10) {
+          completedStep = parsedStep;
+        } else {
+          logger.warn(`Invalid step number extracted from runId ${runId}: ${parsedStep}. Using step 1.`);
+        }
+      }
+      
+      // FIX: Cross-check with demo status to ensure consistency
+      try {
+        const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+        if (await fs.pathExists(demoStatusPath)) {
+          const status = await fs.readJson(demoStatusPath);
+          if (status.currentStep && status.currentStep !== completedStep) {
+            logger.warn(`Step mismatch: runId suggests step ${completedStep}, demo.status.json shows step ${status.currentStep}. Using status file value.`);
+            completedStep = status.currentStep;
+          }
+        }
+      } catch (e: any) {
+        logger.debug(`Could not cross-check step number with status file: ${e.message}`);
       }
       
       const isMultiStep = await handleDemoStepTransition(clientFolder, taskId, completedStep);
@@ -437,8 +537,40 @@ async function _continueWorkflowAfterAgentInternal(
         testError: testResult.error,
       }, 'Tests failed');
       
-      // ... rest of the failure logic ...
-      
+      // FIX: Mark demo step as failed so error recovery (retry/skip) can work
+      if (isDemoTask) {
+        try {
+          const state = await loadTaskState(clientFolder, taskId);
+          const lastCheckpointHash = state?.lastCheckpoint?.gitCommitHash;
+          const stepName = getStepName(currentDemoStep);
+          
+          await markStepFailed(
+            clientFolder,
+            taskId,
+            currentDemoStep,
+            stepName,
+            'test_failure',
+            `Tests failed: ${testResult.error || 'Unknown test error'}`,
+            lastCheckpointHash
+          );
+          
+          // Update demo.status.json for frontend
+          const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+          if (await fs.pathExists(demoStatusPath)) {
+            const demoStatus = await fs.readJson(demoStatusPath);
+            await fs.writeJson(demoStatusPath, {
+              ...demoStatus,
+              state: 'failed',
+              message: `Tests failed: ${testResult.error || 'Unknown test error'}`,
+              updatedAt: new Date().toISOString()
+            }, { spaces: 2 });
+          }
+          
+          logger.info(`Marked demo step ${currentDemoStep} as failed for error recovery (test failure)`);
+        } catch (markErr: any) {
+          logger.warn(`Could not mark demo step as failed: ${markErr.message}`);
+        }
+      }
 
       // Send failure notifications
       const enableEmails = config.approval.enableEmailNotifications ?? true;
@@ -572,30 +704,111 @@ interface DemoTransitionBackup {
 
 /**
  * Performs atomic rollback of demo transition
+ * FIX: Now also cleans up task state and removes any partial agentRunId state files
  */
 async function rollbackDemoTransition(clientFolder: string, backup: DemoTransitionBackup, error: Error): Promise<void> {
   logger.error(`Rolling back demo transition due to error: ${error.message}`);
   
+  const rollbackErrors: string[] = [];
+  
+  // 1. Restore demo.status.json
   try {
     if (backup.statusFile) {
       const statusPath = path.join(clientFolder, 'demo.status.json');
       await fs.writeFile(statusPath, backup.statusFile, 'utf-8');
       logger.info('Restored demo status from backup');
     }
-    
+  } catch (err: any) {
+    rollbackErrors.push(`demo.status.json: ${err.message}`);
+  }
+  
+  // 2. Restore CURSOR_TASK.md
+  try {
     if (backup.promptFile) {
       const promptPath = path.join(clientFolder, 'CURSOR_TASK.md');
       await fs.writeFile(promptPath, backup.promptFile, 'utf-8');
       logger.info('Restored prompt file from backup');
     }
-    
+  } catch (err: any) {
+    rollbackErrors.push(`CURSOR_TASK.md: ${err.message}`);
+  }
+  
+  // 3. Restore workflow_history.json
+  try {
     if (backup.historyFile) {
       const historyPath = path.join(clientFolder, 'workflow_history.json');
       await fs.writeFile(historyPath, backup.historyFile, 'utf-8');
       logger.info('Restored workflow history from backup');
     }
-  } catch (rollbackError: any) {
-    logger.error(`Failed to rollback demo transition: ${rollbackError.message}. Manual intervention required.`);
+  } catch (err: any) {
+    rollbackErrors.push(`workflow_history.json: ${err.message}`);
+  }
+  
+  // 4. FIX: Clean up any partial agentRunId state directories that were created during transition
+  // These would be state files for the NEXT step that we attempted to create
+  try {
+    if (backup.statusFile) {
+      // Parse the backup to get the ORIGINAL currentStep (before failed transition)
+      const originalStatus = JSON.parse(backup.statusFile);
+      const failedNextStep = (originalStatus.currentStep || 1) + 1;
+      
+      // Get base task ID from the status file
+      const taskId = originalStatus.taskId || `demo-${path.basename(clientFolder)}`;
+      const nextStepTaskId = `${taskId}-step${failedNextStep}`;
+      
+      // Remove the state directory for the failed next step
+      const nextStepStateDir = path.join(clientFolder, '.clickup-workflow', nextStepTaskId);
+      if (await fs.pathExists(nextStepStateDir)) {
+        await fs.remove(nextStepStateDir);
+        logger.info(`Removed partial state directory for ${nextStepTaskId}`);
+      }
+      
+      // Also clean up any temp files that might be left behind
+      const tempFiles = [
+        path.join(clientFolder, '.workflow_history.tmp.json'),
+        path.join(clientFolder, '.CURSOR_TASK.tmp.md'),
+        path.join(clientFolder, '.demo.status.tmp.json')
+      ];
+      
+      for (const tempFile of tempFiles) {
+        if (await fs.pathExists(tempFile)) {
+          await fs.remove(tempFile);
+          logger.debug(`Removed temp file: ${tempFile}`);
+        }
+      }
+    }
+  } catch (err: any) {
+    rollbackErrors.push(`state cleanup: ${err.message}`);
+  }
+  
+  // 5. FIX: Update parent task state to reflect the transition failure
+  try {
+    if (backup.statusFile) {
+      const originalStatus = JSON.parse(backup.statusFile);
+      const baseTaskId = originalStatus.taskId || `demo-${path.basename(clientFolder)}`;
+      
+      // Update the parent task's workflow state to indicate transition failure
+      await updateTaskState(clientFolder, baseTaskId, (currentState) => ({
+        metadata: {
+          ...currentState?.metadata,
+          lastTransitionError: {
+            timestamp: new Date().toISOString(),
+            error: error.message,
+            attemptedStep: (originalStatus.currentStep || 1) + 1
+          }
+        }
+      }));
+      logger.info('Updated parent task state with transition error info');
+    }
+  } catch (err: any) {
+    rollbackErrors.push(`task state update: ${err.message}`);
+  }
+  
+  // Log summary of rollback result
+  if (rollbackErrors.length > 0) {
+    logger.error(`Rollback completed with ${rollbackErrors.length} error(s): ${rollbackErrors.join('; ')}. Manual intervention may be required.`);
+  } else {
+    logger.info('Demo transition rollback completed successfully');
   }
 }
 
@@ -636,6 +849,43 @@ async function handleDemoStepTransition(clientFolder: string, taskId: string, co
     status.lastCompletedStep = completedStep;
     await fs.writeJson(demoStatusPath, status, { spaces: 2 });
     logger.info(`Marked step ${completedStep} as completed for demo ${taskId}`);
+
+    // **NEW**: Create checkpoint after successful step completion
+    // FIX: Track checkpoint success to inform error recovery if transition fails
+    let checkpointCreated = false;
+    try {
+      const checkpointResult = await createCheckpoint(
+        clientFolder,
+        taskId,
+        completedStep,
+        getStepName(completedStep)
+      );
+      
+      if (checkpointResult.success) {
+        logger.info(`Checkpoint created for ${taskId} step ${completedStep}: ${checkpointResult.checkpoint?.gitCommitHash}`);
+        checkpointCreated = true;
+      } else {
+        logger.warn(`Checkpoint creation failed for ${taskId} step ${completedStep}: ${checkpointResult.error}`);
+        // Non-fatal - continue with transition even if checkpoint fails
+      }
+    } catch (cpErr: any) {
+      logger.warn(`Error creating checkpoint for ${taskId}: ${cpErr.message}`);
+      // Non-fatal
+    }
+    
+    // Store checkpoint status in metadata for debugging
+    try {
+      await updateTaskState(clientFolder, taskId, (currentState) => ({
+        metadata: {
+          ...currentState?.metadata,
+          lastCheckpointCreated: checkpointCreated,
+          lastCheckpointStep: completedStep,
+          lastCheckpointTime: new Date().toISOString()
+        }
+      }));
+    } catch (e) {
+      // Ignore metadata update failures
+    }
 
     // Auto-build the demo for production serving (ensures /client-websites/{slug}/ is always current)
     // This runs in the background and doesn't block step transitions
@@ -689,11 +939,23 @@ async function handleDemoStepTransition(clientFolder: string, taskId: string, co
     }
 
     // Extract summary from the agent's work
+    // FIX: More robust summary extraction with multiple fallback patterns
     let summary = 'Step completed';
     if (backup.promptFile) {
-      const summaryMatch = backup.promptFile.match(/# Summary\s*([\s\S]*?)(?=\n#|$)/i);
-      if (summaryMatch && summaryMatch[1].trim()) {
-        summary = summaryMatch[1].trim();
+      // Try multiple patterns to find summary (agents may format differently)
+      const patterns = [
+        /# Summary\s*([\s\S]*?)(?=\n#|$)/i,                    // # Summary followed by content
+        /## Summary\s*([\s\S]*?)(?=\n##|$)/i,                  // ## Summary variant
+        /\*\*Summary\*\*:?\s*([^\n]+)/i,                       // **Summary**: inline format
+        /Summary:\s*([^\n]+)/i                                  // Plain Summary: format
+      ];
+      
+      for (const pattern of patterns) {
+        const match = backup.promptFile.match(pattern);
+        if (match && match[1]?.trim()) {
+          summary = match[1].trim().substring(0, 500); // Limit length to prevent oversized history
+          break;
+        }
       }
     }
 
@@ -871,6 +1133,39 @@ async function handleDemoStepTransition(clientFolder: string, taskId: string, co
       logger.error(`Failed to update state after transition error: ${stateError.message}`);
     }
     
+    // FIX: Mark step as failed so error recovery (retry/skip) can work
+    // The transition failed AFTER a step completed, so we mark the NEXT step as failed
+    // (the one we were trying to start)
+    try {
+      // Parse original status to get step info
+      let failedStepNumber = 2; // Default to step 2 if we can't determine
+      let lastCheckpointHash: string | undefined;
+      
+      if (backup.statusFile) {
+        const originalStatus = JSON.parse(backup.statusFile);
+        failedStepNumber = (originalStatus.currentStep || 1) + 1;
+      }
+      
+      // Get last checkpoint hash if available
+      const state = await loadTaskState(clientFolder, taskId);
+      lastCheckpointHash = state?.lastCheckpoint?.gitCommitHash;
+      
+      const stepName = getStepName(failedStepNumber);
+      await markStepFailed(
+        clientFolder,
+        taskId,
+        failedStepNumber,
+        stepName,
+        'transition_error',
+        `Step transition failed: ${error.message}`,
+        lastCheckpointHash
+      );
+      
+      logger.info(`Marked step ${failedStepNumber} as failed for error recovery`);
+    } catch (markErr: any) {
+      logger.warn(`Could not mark step as failed for recovery: ${markErr.message}`);
+    }
+    
     return false;
   }
 }
@@ -950,6 +1245,473 @@ export async function completeWorkflowAfterApproval(
 /**
  * Handles task rejection with feedback: patches prompt, updates state, and reruns agent
  */
+// ============================================
+// Demo Error Recovery Functions
+// ============================================
+
+/**
+ * Continues demo execution after error recovery.
+ * Called when user clicks retry or skip on frontend.
+ * 
+ * @param clientFolder - Path to the client folder
+ * @param taskId - The demo task ID
+ * @param action - 'retry' to rollback and retry, 'skip' to advance to next step
+ */
+export async function continueAfterError(
+  clientFolder: string,
+  taskId: string,
+  action: 'retry' | 'skip'
+): Promise<{ success: boolean; message: string; nextStep?: number; error?: string }> {
+  logger.info(`Continuing ${taskId} after error with action: ${action}`);
+  
+  // FIX: acquireRetryLock now returns the lock token (or null if failed)
+  // We store the token to pass to releaseRetryLock for ownership verification
+  const lockToken = await acquireRetryLock(clientFolder, taskId, action);
+  if (!lockToken) {
+    // FIX: Return early WITHOUT entering try-finally to avoid releasing a lock we don't own
+    return {
+      success: false,
+      message: 'Another recovery operation is in progress',
+      error: 'Recovery operation already in progress. Please wait.'
+    };
+  }
+  
+  // Only enter try-finally AFTER we've successfully acquired the lock
+  try {
+    const state = await loadTaskState(clientFolder, taskId);
+    if (!state?.failedStep) {
+      return {
+        success: false,
+        message: 'No failed step found',
+        error: 'Demo is not in a failed state'
+      };
+    }
+    
+    const failedStep = state.failedStep;
+    
+    // Load demo status for total steps
+    const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+    let totalSteps = 4;
+    if (await fs.pathExists(demoStatusPath)) {
+      const status = await fs.readJson(demoStatusPath);
+      totalSteps = status.totalSteps || 4;
+    }
+    
+    if (action === 'retry') {
+      return await handleRetryAction(clientFolder, taskId, failedStep, totalSteps);
+    } else if (action === 'skip') {
+      return await handleSkipAction(clientFolder, taskId, failedStep, totalSteps);
+    } else {
+      return {
+        success: false,
+        message: 'Invalid action',
+        error: `Unknown action: ${action}`
+      };
+    }
+    
+  } catch (error: any) {
+    logger.error(`Error in continueAfterError for ${taskId}: ${error.message}`);
+    return {
+      success: false,
+      message: 'Recovery failed',
+      error: error.message
+    };
+  } finally {
+    // FIX: Pass the lock token to verify we own the lock before releasing
+    // This prevents releasing a lock that was taken over by another process
+    // due to timeout while our operation was running
+    try {
+      await releaseRetryLock(clientFolder, taskId, lockToken);
+    } catch (lockErr) {
+      logger.warn(`Could not release retry lock for ${taskId}: ${lockErr}`);
+    }
+  }
+}
+
+/**
+ * Handles the retry action - rolls back to checkpoint and re-executes step
+ */
+async function handleRetryAction(
+  clientFolder: string,
+  taskId: string,
+  failedStep: { stepNumber: number; stepName: string; retryCount: number; errorCategory?: string; errorMessage?: string },
+  totalSteps: number
+): Promise<{ success: boolean; message: string; nextStep?: number; error?: string }> {
+  
+  // Check retry limit
+  const MAX_RETRIES = 3;
+  if (failedStep.retryCount >= MAX_RETRIES) {
+    return {
+      success: false,
+      message: `Maximum retries (${MAX_RETRIES}) reached for step ${failedStep.stepNumber}`,
+      error: 'Please try skipping this step or restart the demo'
+    };
+  }
+  
+  // Find recovery checkpoint
+  const checkpoint = await findRecoveryCheckpoint(clientFolder, taskId, failedStep.stepNumber);
+  
+  if (!checkpoint) {
+    logger.warn(`No checkpoint found for ${taskId}, cannot rollback`);
+    // FIX: Store complete original failedStep info before clearing to preserve on failure
+    const originalFailedStep = { ...failedStep };
+    
+    // Clear failed step marker BEFORE retrigger to prevent state inconsistency
+    // The demo.status.json will be updated to 'triggering' during retrigger, so we need
+    // the task state to also reflect we're no longer in error state
+    await clearFailedStepMarker(clientFolder, taskId);
+    
+    // FIX: Set retrying metadata flag BEFORE calling retriggerStep so it can detect this is a retry
+    // This is critical for step 1 retries to use a unique agentRunId
+    await updateTaskState(clientFolder, taskId, (current) => ({
+      metadata: {
+        ...current?.metadata,
+        retrying: true,
+        retryingStep: failedStep.stepNumber,
+        retryTriggeredAt: new Date().toISOString()
+      }
+    }));
+    
+    const retriggerResult = await retriggerStep(clientFolder, taskId, failedStep.stepNumber);
+    
+    // If retrigger failed, restore the error state so user can see the failure
+    // FIX: Preserve ALL original error context including errorCategory and errorMessage
+    if (!retriggerResult.success) {
+      await updateTaskState(clientFolder, taskId, () => ({
+        failedStep: {
+          stepNumber: originalFailedStep.stepNumber,
+          stepName: originalFailedStep.stepName,
+          errorCategory: originalFailedStep.errorCategory || 'step_failed', // Preserve original category
+          errorMessage: `Retrigger failed: ${retriggerResult.error || 'Unknown error'}. Original error: ${originalFailedStep.errorMessage || 'Unknown'}`,
+          timestamp: new Date().toISOString(),
+          retryCount: (originalFailedStep.retryCount || 0) + 1 // FIX: Increment retry count on failure
+        },
+        state: WorkflowState.ERROR
+      }));
+      
+      // FIX: Also update demo.status.json to reflect the failed state for frontend
+      try {
+        const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+        if (await fs.pathExists(demoStatusPath)) {
+          const status = await fs.readJson(demoStatusPath);
+          await fs.writeJson(demoStatusPath, {
+            ...status,
+            state: 'failed',
+            message: `Retry failed: ${retriggerResult.error || 'Unknown error'}`,
+            updatedAt: new Date().toISOString()
+          }, { spaces: 2 });
+        }
+      } catch (e: any) {
+        logger.warn(`Could not update demo.status.json after retry failure: ${e.message}`);
+      }
+    }
+    
+    return retriggerResult;
+  }
+  
+  // Perform rollback
+  const rollbackResult = await rollbackToCheckpoint(clientFolder, taskId, checkpoint);
+  
+  if (!rollbackResult.success) {
+    return {
+      success: false,
+      message: 'Rollback failed',
+      error: rollbackResult.error || 'Could not rollback to checkpoint'
+    };
+  }
+  
+  logger.info(`Rollback successful for ${taskId}, ${rollbackResult.discardedCommits} commits discarded`);
+  
+  // FIX: Set retrying metadata flag BEFORE calling retriggerStep so it can detect this is a retry
+  // This is critical for step 1 retries to use a unique agentRunId
+  await updateTaskState(clientFolder, taskId, (current) => ({
+    metadata: {
+      ...current?.metadata,
+      retrying: true,
+      retryingStep: failedStep.stepNumber,
+      retryTriggeredAt: new Date().toISOString()
+    }
+  }));
+  
+  // Re-trigger the failed step
+  return await retriggerStep(clientFolder, taskId, failedStep.stepNumber);
+}
+
+/**
+ * Handles the skip action - advances to next step without rollback
+ */
+async function handleSkipAction(
+  clientFolder: string,
+  taskId: string,
+  failedStep: { stepNumber: number; stepName: string },
+  totalSteps: number
+): Promise<{ success: boolean; message: string; nextStep?: number; error?: string }> {
+  
+  if (failedStep.stepNumber >= totalSteps) {
+    return {
+      success: false,
+      message: 'Cannot skip final step',
+      error: 'The final step cannot be skipped. Please retry or restart the demo.'
+    };
+  }
+  
+  const skipResult = await skipFailedStep(clientFolder, taskId, failedStep.stepNumber, totalSteps);
+  
+  if (!skipResult.success) {
+    return {
+      success: false,
+      message: 'Skip failed',
+      error: skipResult.error || 'Could not skip to next step'
+    };
+  }
+  
+  // Trigger the next step
+  return await retriggerStep(clientFolder, taskId, skipResult.nextStep);
+}
+
+/**
+ * Re-triggers execution from a specific step
+ */
+async function retriggerStep(
+  clientFolder: string,
+  taskId: string,
+  stepNumber: number
+): Promise<{ success: boolean; message: string; nextStep?: number; error?: string }> {
+  try {
+    // Load demo context
+    const contextPath = path.join(clientFolder, 'demo.context.json');
+    if (!(await fs.pathExists(contextPath))) {
+      return {
+        success: false,
+        message: 'Context not found',
+        error: 'Demo context file not found'
+      };
+    }
+    const context = await fs.readJson(contextPath);
+    
+    // Update demo.status.json
+    const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+    if (await fs.pathExists(demoStatusPath)) {
+      const status = await fs.readJson(demoStatusPath);
+      await fs.writeJson(demoStatusPath, {
+        ...status,
+        currentStep: stepNumber,
+        state: 'triggering',
+        message: `Retrying step ${stepNumber}: ${getStepName(stepNumber)}`,
+        updatedAt: new Date().toISOString(),
+        logs: [
+          ...(status.logs || []),
+          `[${new Date().toLocaleTimeString()}] Retrying step ${stepNumber}...`
+        ]
+      }, { spaces: 2 });
+    }
+    
+    // Load prompt template for the step
+    const promptFile = `demo_step${stepNumber}_${getStepName(stepNumber)}.md`;
+    const promptTemplatePath = path.join(process.cwd(), 'prompts', promptFile);
+    
+    if (!(await fs.pathExists(promptTemplatePath))) {
+      return {
+        success: false,
+        message: 'Prompt not found',
+        error: `Prompt template for step ${stepNumber} not found`
+      };
+    }
+    
+    let promptContent = await fs.readFile(promptTemplatePath, 'utf-8');
+    
+    // Get total steps
+    let totalSteps = 4;
+    if (await fs.pathExists(demoStatusPath)) {
+      const status = await fs.readJson(demoStatusPath);
+      totalSteps = status.totalSteps || 4;
+    }
+    
+    // Replace placeholders
+    // FIX: Simplified and robust retry detection
+    // Instead of complex timestamp-based detection, check definitive indicators:
+    // 1. metadata.retrying flag (set by handleRetryAction before calling retriggerStep)
+    // 2. metadata.stepRetryHistory having any retries for this step
+    // 3. For step 1 specifically, check if this step has ever been run before (via checkpoints)
+    const taskState = await loadTaskState(clientFolder, taskId);
+    
+    // Simple check: Is this explicitly marked as a retry?
+    const explicitRetry = taskState?.metadata?.retrying === true;
+    
+    // Check if this step has been attempted before (retry history shows past attempts)
+    const stepRetryHistory = taskState?.metadata?.stepRetryHistory || {};
+    const hasRetryHistory = (stepRetryHistory[stepNumber] || 0) > 0;
+    
+    // Check if step 1 has a checkpoint (meaning it completed before and this is a re-run)
+    const hasStep1Checkpoint = taskState?.checkpoints?.some((cp: any) => cp.stepNumber === 1);
+    
+    // Determine if this is a retry scenario
+    const isRetrying = explicitRetry || hasRetryHistory || (stepNumber === 1 && hasStep1Checkpoint);
+    
+    // FIX: Always use step-specific ID for step 1 retries to prevent collision with original run
+    // The original step 1 run uses taskId directly, so retries must use taskId-step1
+    const agentRunId = (stepNumber > 1 || isRetrying) ? `${taskId}-step${stepNumber}` : taskId;
+    
+    logger.debug(`Retry detection for ${taskId} step ${stepNumber}: explicitRetry=${explicitRetry}, hasRetryHistory=${hasRetryHistory}, hasStep1Checkpoint=${hasStep1Checkpoint}, isRetrying=${isRetrying}, agentRunId=${agentRunId}`);
+    
+    // FIX: Load actual workflow history instead of empty array to preserve context
+    let workflowHistory: any[] = [];
+    const historyPath = path.join(clientFolder, 'workflow_history.json');
+    if (await fs.pathExists(historyPath)) {
+      try {
+        const historyData = await fs.readJson(historyPath);
+        workflowHistory = Array.isArray(historyData) ? historyData : [historyData];
+      } catch (e) {
+        logger.warn(`Could not load workflow history for retrigger: ${e}`);
+      }
+    }
+    
+    const replacements: Record<string, string> = {
+      '{{taskId}}': agentRunId,
+      '{{currentStep}}': stepNumber.toString(),
+      '{{totalSteps}}': totalSteps.toString(),
+      '{{businessName}}': context.businessName || '',
+      '{{clientSlug}}': context.clientSlug || '',
+      '{{email}}': context.email || 'N/A',
+      '{{phone}}': context.phone || 'N/A',
+      '{{address}}': context.address || 'N/A',
+      '{{primaryColor}}': context.primaryColor || '#000000',
+      '{{secondaryColor}}': context.secondaryColor || '#ffffff',
+      '{{fontFamily}}': context.fontFamily || 'sans-serif',
+      '{{services}}': context.services || context.businessDescription || 'N/A',
+      '{{imagesDir}}': context.imagesDir || 'src/assets/images',
+      '{{imageRetrieverPath}}': context.imageRetrieverPath || '',
+      '{{workflowHistory}}': JSON.stringify(workflowHistory, null, 2)
+    };
+    
+    for (const [key, value] of Object.entries(replacements)) {
+      promptContent = promptContent.split(key).join(value);
+    }
+    
+    // Write the prompt
+    const taskFilePath = path.join(clientFolder, 'CURSOR_TASK.md');
+    await fs.writeFile(taskFilePath, promptContent, 'utf-8');
+    
+    // Update task state
+    await updateWorkflowState(clientFolder, taskId, WorkflowState.IN_PROGRESS, {
+      demoStep: stepNumber,
+      retrying: true
+    }, `Retrying step ${stepNumber}`);
+    
+    // Initialize state for the unique runId
+    // FIX: Also save state for step 1 retries to ensure agentRunId has proper context
+    const parentState = await loadTaskState(clientFolder, taskId);
+    if (parentState && (stepNumber > 1 || isRetrying)) {
+      await saveTaskState(clientFolder, agentRunId, {
+        ...parentState,
+        taskId: agentRunId,
+        state: WorkflowState.IN_PROGRESS,
+        agentCompletion: undefined,
+        failedStep: undefined
+      });
+    }
+    
+    // Trigger the agent
+    const taskInfo = await loadTaskInfo(clientFolder, taskId);
+    // FIX: ClickUpTask is a type, not a value - use type import correctly
+    type ClickUpTaskType = import('../clickup/apiClient').ClickUpTask;
+    
+    const mockTask: ClickUpTaskType = {
+      ...(taskInfo?.task || {}),
+      id: agentRunId,
+      name: `Demo Step ${stepNumber}: ${context.businessName}`,
+      description: taskInfo?.task?.description || `Demo customization step ${stepNumber}`
+    } as ClickUpTaskType;
+    
+    // Save task info for the agentRunId
+    await saveTaskInfo(clientFolder, agentRunId, {
+      task: mockTask,
+      taskId: taskId, // Parent taskId
+      clientName: context.businessName,
+      clientFolder: clientFolder
+    });
+    
+    // Get step-specific model
+    const stepModel = context.stepModels?.[stepNumber] || context.aiModel || config.cursor.defaultModel;
+    
+    // Trigger agent
+    const { triggerCursorAgent } = await import('../cursor/workspaceManager');
+    await triggerCursorAgent(clientFolder, mockTask, { model: stepModel });
+    
+    logger.info(`Retriggered step ${stepNumber} for ${taskId}`);
+    
+    return {
+      success: true,
+      message: `Retrying step ${stepNumber}...`,
+      nextStep: stepNumber
+    };
+    
+  } catch (error: any) {
+    logger.error(`Failed to retrigger step ${stepNumber} for ${taskId}: ${error.message}`);
+    return {
+      success: false,
+      message: 'Retrigger failed',
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Gets rollback preview for UI display
+ */
+export async function getRollbackPreview(
+  clientFolder: string,
+  taskId: string
+): Promise<{
+  preview: { preservedSteps: string[]; discardedChanges: string[]; changedFiles: string[] } | null;
+  error?: string;
+}> {
+  try {
+    const recoveryState = await getRecoveryState(clientFolder, taskId);
+    
+    if (!recoveryState.failedStep) {
+      return { preview: null, error: 'No failed step found' };
+    }
+    
+    const checkpoint = await findRecoveryCheckpoint(
+      clientFolder, 
+      taskId, 
+      recoveryState.failedStep.stepNumber
+    );
+    
+    if (!checkpoint) {
+      return { 
+        preview: {
+          preservedSteps: ['No checkpoint available'],
+          discardedChanges: ['Step will be re-executed from current state'],
+          changedFiles: []
+        }
+      };
+    }
+    
+    const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+    let totalSteps = 4;
+    if (await fs.pathExists(demoStatusPath)) {
+      const status = await fs.readJson(demoStatusPath);
+      totalSteps = status.totalSteps || 4;
+    }
+    
+    const preview = await generateRollbackPreview(clientFolder, taskId, checkpoint, totalSteps);
+    
+    return {
+      preview: {
+        preservedSteps: preview.preservedSteps,
+        discardedChanges: preview.discardedChanges,
+        changedFiles: preview.changedFiles
+      }
+    };
+    
+  } catch (error: any) {
+    logger.error(`Error getting rollback preview: ${error.message}`);
+    return { preview: null, error: error.message };
+  }
+}
+
 export async function handleTaskRejectionWithFeedback(
   clientFolder: string,
   taskId: string,

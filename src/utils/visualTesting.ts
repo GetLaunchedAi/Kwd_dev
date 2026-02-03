@@ -528,7 +528,8 @@ export class VisualTester {
     taskId: string,
     prefix: 'before' | 'after',
     iteration: number = 0,
-    options: ScreenshotOptions = {}
+    options: ScreenshotOptions = {},
+    clientFolder?: string
   ): Promise<ScreenshotResult | null> {
     try {
       logger.info(`Taking comprehensive site screenshots for task ${taskId} at ${url} (${prefix}, iteration ${iteration})`);
@@ -538,7 +539,7 @@ export class VisualTester {
         concurrency: options.concurrency || 2,
         captureSections: options.captureSections !== false,
         ...options
-      });
+      }, clientFolder);
       
       // ISSUE 2 FIX: Check if screenshots were actually captured successfully
       if (!result.success) {

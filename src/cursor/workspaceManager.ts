@@ -363,6 +363,16 @@ export async function triggerCursorAgent(
     percent: 80
   }, clientFolder);
 
+  // CRITICAL: Update workflow state to IN_PROGRESS so frontend shows correct status
+  // This is the authoritative state stored in .clickup-workflow/{taskId}/state.json
+  try {
+    await updateWorkflowState(clientFolder, task.id, WorkflowState.IN_PROGRESS, undefined, 'Agent starting...');
+    logger.info(`Updated task ${task.id} workflow state to IN_PROGRESS`);
+  } catch (stateErr) {
+    logger.warn(`Failed to update workflow state for task ${task.id}: ${stateErr}`);
+    // Continue anyway - the agent can still run
+  }
+
   try {
     // triggerAgent is internally non-blocking
     await triggerAgent(clientFolder, promptPath, task, { model: options?.model });

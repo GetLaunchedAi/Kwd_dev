@@ -7,8 +7,9 @@
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { chromium, Browser, BrowserContext, Page, ElementHandle } from 'playwright';
 import { logger } from './logger';
+import { updateTaskState } from '../state/stateManager';
 
 // ============================================================================
 // Types and Interfaces
@@ -78,10 +79,13 @@ export interface ScreenshotOptions {
 // ============================================================================
 
 /** Wait timeout for images to load (ms) */
-const IMAGE_LOAD_TIMEOUT = 5000;
+const IMAGE_LOAD_TIMEOUT = 10000; // Increased from 5000 to 10000 for better reliability
 
 /** Minimum wait after scroll to let lazy images start loading (ms) */
-const POST_SCROLL_WAIT = 300;
+const POST_SCROLL_WAIT = 800; // Increased from 300 to 800 for lazy-load triggers
+
+/** Wait after page load for initial render (ms) */
+const INITIAL_RENDER_WAIT = 1500; // Increased from 500 for complete initial render
 
 const DEFAULT_OPTIONS: Required<ScreenshotOptions> = {
   maxPages: 20,
@@ -170,9 +174,30 @@ function safePart(s: string): string {
 /**
  * Waits for all visible images on the page (or within an element) to fully load.
  * Handles lazy-loaded images by checking their complete state.
+ * Includes network idle detection for better reliability.
  */
 async function waitForImagesToLoad(page: Page, selector?: string): Promise<void> {
   try {
+    // Check if page is still open
+    if (page.isClosed()) {
+      logger.debug('Page is closed, skipping image wait');
+      return;
+    }
+    
+    // Wait for network to be idle first (new for Phase 2)
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch((err) => {
+      // Only log if it's not a page closed error
+      if (!page.isClosed()) {
+        logger.debug('Network did not reach idle state, proceeding anyway');
+      }
+    });
+    
+    // Check again after network wait
+    if (page.isClosed()) {
+      logger.debug('Page closed during network idle wait');
+      return;
+    }
+    
     await page.evaluate(async ({ timeout, selector }) => {
       const container = selector ? document.querySelector(selector) : document;
       if (!container) return;
@@ -201,9 +226,67 @@ async function waitForImagesToLoad(page: Page, selector?: string): Promise<void>
         });
       }));
     }, { timeout: IMAGE_LOAD_TIMEOUT, selector });
-  } catch (err) {
-    // Silently continue if waiting fails - better to capture partial than fail entirely
-    logger.debug(`Image wait completed (some may not have loaded): ${err}`);
+  } catch (err: any) {
+    // Handle page closed or navigation errors gracefully
+    if (page.isClosed()) {
+      logger.debug('Page was closed during image wait');
+    } else if (err.message?.includes('navigation') || err.message?.includes('frame')) {
+      logger.debug(`Page navigation occurred during image wait: ${err.message}`);
+    } else {
+      logger.debug(`Image wait completed with warnings: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Checks if an element handle is still valid and attached to the DOM.
+ */
+async function isElementHandleValid(handle: ElementHandle<Element>): Promise<boolean> {
+  try {
+    // Try to get bounding box - will fail if element is detached
+    const box = await handle.boundingBox();
+    return box !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verifies all images in a specific element are loaded.
+ * Returns an object with verification status and context.
+ */
+async function verifySectionImagesLoaded(
+  page: Page, 
+  sectionHandle: ElementHandle<Element>
+): Promise<{ loaded: boolean; hasImages: boolean; error?: string }> {
+  try {
+    // Check if page is still open before proceeding
+    if (page.isClosed()) {
+      return { loaded: false, hasImages: false, error: 'Page is closed' };
+    }
+    
+    const result = await sectionHandle.evaluate((el: Element) => {
+      const imgs = Array.from(el.querySelectorAll('img'));
+      const hasImages = imgs.length > 0;
+      const allLoaded = imgs.every(img => 
+        (img as HTMLImageElement).complete && 
+        (img as HTMLImageElement).naturalHeight > 0
+      );
+      return { hasImages, allLoaded };
+    });
+    
+    return { 
+      loaded: result.allLoaded, 
+      hasImages: result.hasImages 
+    };
+  } catch (err: any) {
+    // Element might be detached or page navigated
+    logger.debug(`Could not verify section images: ${err.message}`);
+    return { 
+      loaded: false, 
+      hasImages: false, 
+      error: err.message 
+    };
   }
 }
 
@@ -319,7 +402,7 @@ async function screenshotSectionsOnPage(
 
   try {
     await page.goto(url, { waitUntil: 'networkidle', timeout: options.timeout });
-    await page.waitForTimeout(500); // Let animations settle
+    await page.waitForTimeout(INITIAL_RENDER_WAIT); // Let initial render and animations settle (Phase 2: increased from 500)
     
     // Wait for all images to fully load before capturing
     await waitForImagesToLoad(page);
@@ -337,6 +420,13 @@ async function screenshotSectionsOnPage(
 
       for (let i = 0; i < handles.length; i++) {
         const h = handles[i];
+
+        // Validate element handle is still valid before processing
+        const isValid = await isElementHandleValid(h);
+        if (!isValid) {
+          logger.debug('Skipping detached element handle');
+          continue;
+        }
 
         const info = await h.evaluate((el: Element) => {
           const tag = el.tagName.toLowerCase();
@@ -358,11 +448,23 @@ async function screenshotSectionsOnPage(
           await h.scrollIntoViewIfNeeded();
           await page.waitForTimeout(POST_SCROLL_WAIT); // Wait for lazy-load triggers
           
-          // Wait for images within this section to load
+          // Verify images in this specific section (Phase 2 enhancement)
+          const verification = await verifySectionImagesLoaded(page, h);
+          
+          // Only wait if we have images that aren't loaded (not on errors)
+          if (verification.hasImages && !verification.loaded && !verification.error) {
+            logger.debug(`Section has ${verification.hasImages ? 'unloaded' : 'no'} images, waiting additional time`);
+            await page.waitForTimeout(1000);
+          } else if (verification.error) {
+            // If there was an error checking, skip the extra wait and proceed
+            logger.debug(`Skipping verification wait due to error: ${verification.error}`);
+          }
+          
+          // Wait for images within this section to load (only if no critical errors)
           const sectionId = info.id ? `#${info.id}` : undefined;
-          if (sectionId) {
+          if (sectionId && !page.isClosed()) {
             await waitForImagesToLoad(page, sectionId);
-          } else {
+          } else if (!page.isClosed()) {
             // For sections without ID, do a brief general wait for any newly triggered images
             await page.waitForTimeout(200);
           }
@@ -461,7 +563,8 @@ export async function captureWebsiteScreenshots(
   taskId: string,
   prefix: 'before' | 'after',
   iteration: number = 0,
-  userOptions: ScreenshotOptions = {}
+  userOptions: ScreenshotOptions = {},
+  clientFolder?: string
 ): Promise<ScreenshotResult> {
   const options: Required<ScreenshotOptions> = { ...DEFAULT_OPTIONS, ...userOptions };
   const timestamp = new Date().toISOString();
@@ -474,15 +577,30 @@ export async function captureWebsiteScreenshots(
   logger.info(`Capturing ${prefix} screenshots for task ${taskId} (iteration ${iteration})`);
   logger.debug(`Output directory: ${outDir}`);
 
+  // Set initial capturing state metadata if clientFolder is provided
+  if (clientFolder) {
+    await updateTaskState(clientFolder, taskId, (current) => ({
+      metadata: {
+        ...current?.metadata,
+        capturingScreenshots: true,
+        screenshotPhase: prefix,
+        screenshotProgress: 0
+      }
+    })).catch(err => {
+      logger.warn(`Could not update screenshot capture metadata: ${err.message}`);
+    });
+  }
+
   // Cleanup old iterations if enabled
   if (options.cleanupOldIterations) {
     await cleanupOldIterations(screenshotsBaseDir, taskId, prefix, options.maxIterationsToKeep);
   }
 
-  const browser = await chromium.launch({ headless: true });
+  let browser: Browser | null = null;
   let urls: string[] = [];
 
   try {
+    browser = await chromium.launch({ headless: true });
     // Get URLs from sitemap or crawl
     const sitemapAllowed = options.useSitemap === 'true' || options.useSitemap === 'auto';
     if (sitemapAllowed) {
@@ -513,6 +631,7 @@ export async function captureWebsiteScreenshots(
     // Process pages with concurrency control
     const results: PageScreenshots[] = [];
     const queue = [...urls];
+    let lastProgressUpdate = 0;
 
     const workers = Array.from(
       { length: Math.min(options.concurrency, queue.length) },
@@ -522,6 +641,23 @@ export async function captureWebsiteScreenshots(
           if (!url) break;
           const result = await screenshotSectionsOnPage(context, url, outDir, options);
           results.push(result);
+          
+          // Update progress metadata (throttled to avoid excessive state updates)
+          if (clientFolder && results.length > 0 && urls.length > 0) {
+            const progress = Math.min(100, Math.round((results.length / urls.length) * 100));
+            // Only update if progress changed by at least 5% or it's the last page
+            if (progress - lastProgressUpdate >= 5 || results.length === urls.length) {
+              lastProgressUpdate = progress;
+              await updateTaskState(clientFolder, taskId, (current) => ({
+                metadata: {
+                  ...current?.metadata,
+                  screenshotProgress: progress
+                }
+              })).catch(err => {
+                logger.debug(`Could not update screenshot progress: ${err.message}`);
+              });
+            }
+          }
         }
       }
     );
@@ -573,6 +709,19 @@ export async function captureWebsiteScreenshots(
       logger.error(`Screenshot capture FAILED: 0/${results.length} pages captured. Errors: ${errorMsg}`);
     }
 
+    // Clear capturing state metadata if clientFolder is provided
+    if (clientFolder) {
+      await updateTaskState(clientFolder, taskId, (current) => ({
+        metadata: {
+          ...current?.metadata,
+          capturingScreenshots: false,
+          screenshotProgress: 100
+        }
+      })).catch(err => {
+        logger.warn(`Could not clear screenshot capture metadata: ${err.message}`);
+      });
+    }
+
     return {
       pages: results,
       manifest,
@@ -583,8 +732,29 @@ export async function captureWebsiteScreenshots(
       failedPages: failedPages.length,
       error: hasAnySuccess ? undefined : (failedPages.map(p => p.error).filter(Boolean).join('; ') || 'All page captures failed')
     };
+  } catch (error: any) {
+    // Clear capturing state on error if clientFolder is provided
+    if (clientFolder) {
+      await updateTaskState(clientFolder, taskId, (current) => ({
+        metadata: {
+          ...current?.metadata,
+          capturingScreenshots: false,
+          screenshotProgress: 0
+        }
+      })).catch(err => {
+        logger.debug(`Could not clear screenshot capture metadata on error: ${err.message}`);
+      });
+    }
+    throw error;
   } finally {
-    await browser.close();
+    // Only close browser if it was successfully created
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeErr: any) {
+        logger.warn(`Error closing browser: ${closeErr.message}`);
+      }
+    }
   }
 }
 

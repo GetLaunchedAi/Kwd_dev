@@ -49,6 +49,12 @@ const ERROR_PATTERNS: Array<{ pattern: RegExp; message: string; }> = [
   { pattern: /agent.*timeout/i, message: 'The AI agent took too long to respond. Please try again.' },
   { pattern: /completion detection timed out/i, message: 'The process took too long and was stopped. Please try again.' },
   
+  // Cursor credit/usage limit errors
+  { pattern: /usage.?limit|credit.?(limit|exhaust|exceed)|out of credits|no credits|quota.?(exceed|limit)/i, message: 'AI credits have been exhausted. Please wait for credits to reset or upgrade your plan.' },
+  { pattern: /rate.?limit.*cursor|cursor.*rate.?limit/i, message: 'AI service rate limit reached. Please wait a few minutes and try again.' },
+  { pattern: /billing|subscription|payment.*required/i, message: 'AI service billing issue. Please check your subscription status.' },
+  { pattern: /model.*not available|model.*unavailable|cannot access.*model/i, message: 'The requested AI model is not available. Try selecting a different model.' },
+  
   // Database/Storage errors
   { pattern: /SQLITE_BUSY/i, message: 'The database is busy. Please try again in a moment.' },
   { pattern: /SQLITE_LOCKED/i, message: 'The database is temporarily locked. Please try again.' },
@@ -77,6 +83,11 @@ const ERROR_CODE_MAP: Record<string, string> = {
   'INVALID_FILE_TYPE': 'This file type is not supported.',
   'FILE_TOO_LARGE': 'The file is too large. Please reduce the file size.',
   'UPLOAD_FAILED': 'File upload failed. Please try again.',
+  'CREDIT_LIMIT_EXCEEDED': 'AI credits have been exhausted. Please wait for credits to reset or upgrade your plan.',
+  'CURSOR_CREDIT_ERROR': 'AI credits have been exhausted. Please wait for credits to reset or upgrade your plan.',
+  'MODEL_UNAVAILABLE': 'The requested AI model is not available. Please select a different model.',
+  'AGENT_AUTH_FAILED': 'AI agent authentication failed. Please re-authenticate cursor-agent.',
+  'AGENT_TIMEOUT': 'The AI agent took too long to respond. Please try again.',
 };
 
 /**

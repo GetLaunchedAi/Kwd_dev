@@ -33,6 +33,16 @@ export async function processWebhookEvent(req: Request): Promise<ProcessedWebhoo
 
     logger.info(`Received webhook event: ${event.event} for task: ${event.task_id}`);
 
+    // ISSUE 5 FIX: Filter out local task IDs from webhook processing
+    // Local tasks (created via dashboard without ClickUp) use IDs prefixed with "local-"
+    // These should never come from ClickUp webhooks, but we guard against:
+    // 1. Malicious/malformed webhook payloads with crafted task IDs
+    // 2. Edge cases where ClickUp might use IDs starting with "local-" (extremely unlikely)
+    if (event.task_id && event.task_id.startsWith('local-')) {
+      logger.warn(`Ignoring webhook event with local task ID: ${event.task_id}. Local tasks are not managed via ClickUp webhooks.`);
+      return null;
+    }
+
     // Check if this is a status change event
     if (event.event !== 'taskStatusUpdated' && event.event !== 'taskUpdated') {
       logger.debug(`Event type ${event.event} is not a status change, ignoring`);

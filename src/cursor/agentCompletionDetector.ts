@@ -165,8 +165,21 @@ async function checkStatusFile(clientFolder: string, taskId: string): Promise<{ 
       logger.info(`Task ${taskId} completion detected: state=${status.state} in ${statusPath}`);
       return { isComplete: true, success: true };
     } else if (status.state === 'failed' || status.state === 'FAILED') {
-      logger.info(`Task ${taskId} failure detected: state=${status.state} in ${statusPath}`);
-      return { isComplete: true, success: false, error: status.errors?.[0] || status.error || 'Unknown error from agent' };
+      // Extract detailed error information including credit/model errors
+      let errorMsg = status.errors?.[0] || status.error || 'Unknown error from agent';
+      
+      // Check for credit limit errors and ensure they're properly reported
+      if (status.creditError || /usage.?limit|credit|quota/i.test(errorMsg)) {
+        errorMsg = status.userMessage || 'AI credits exhausted. Please wait for credits to reset or upgrade your plan.';
+        logger.error(`Task ${taskId} failed due to CREDIT LIMIT: ${errorMsg}`);
+      } else if (status.modelError) {
+        errorMsg = status.userMessage || `Model "${status.failedModel || 'selected'}" is unavailable`;
+        logger.error(`Task ${taskId} failed due to MODEL ERROR: ${errorMsg}`);
+      } else {
+        logger.info(`Task ${taskId} failure detected: state=${status.state} in ${statusPath}`);
+      }
+      
+      return { isComplete: true, success: false, error: errorMsg };
     }
 
     // Task is still running
@@ -446,6 +459,59 @@ async function handleCompletion(
       await updateWorkflowStateOnError(clientFolder, taskId, error);
     } catch (stateError: any) {
       logger.error(`Failed to update workflow state after completion error: ${stateError.message}`);
+    }
+    
+    // FIX: Mark demo step as failed so error recovery (retry/skip) can work
+    // This handles the case where agent succeeded but post-completion workflow failed
+    if (taskId.startsWith('demo-')) {
+      try {
+        const { markStepFailed, loadTaskState } = await import('../state/stateManager');
+        
+        // Extract step number from taskId: "demo-xyz" is step 1, "demo-xyz-step2" is step 2, etc.
+        let stepNumber = 1;
+        const stepMatch = taskId.match(/-step(\d+)$/);
+        if (stepMatch) {
+          const parsed = parseInt(stepMatch[1], 10);
+          if (!isNaN(parsed) && parsed >= 1 && parsed <= 10) {
+            stepNumber = parsed;
+          }
+        }
+        
+        // Get base task ID for state updates
+        const baseTaskId = taskId.replace(/-step\d+$/, '');
+        const stepNames = ['branding', 'copywriting', 'imagery', 'review'];
+        const stepName = stepNames[stepNumber - 1] || 'unknown';
+        
+        // Get last checkpoint hash if available
+        const state = await loadTaskState(clientFolder, baseTaskId);
+        const lastCheckpointHash = state?.lastCheckpoint?.gitCommitHash;
+        
+        await markStepFailed(
+          clientFolder,
+          baseTaskId,
+          stepNumber,
+          stepName,
+          'workflow_error',
+          `Post-completion workflow failed: ${error.message}`,
+          lastCheckpointHash
+        );
+        
+        // Also update demo.status.json for frontend
+        const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+        if (await fs.pathExists(demoStatusPath)) {
+          const status = await fs.readJson(demoStatusPath);
+          await fs.writeJson(demoStatusPath, {
+            ...status,
+            state: 'failed',
+            message: `Workflow error: ${error.message}`,
+            updatedAt: new Date().toISOString()
+          }, { spaces: 2 });
+        }
+        
+        logger.info(`Marked demo step ${stepNumber} as failed for error recovery: ${error.message}`);
+      } catch (markErr: any) {
+        logger.warn(`Could not mark demo step as failed: ${markErr.message}`);
+      }
     }
     
     // Clean up polling

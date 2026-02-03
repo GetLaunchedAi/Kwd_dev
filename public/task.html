@@ -22,6 +22,10 @@
                     <i data-lucide="layout-dashboard"></i>
                     <span>Dashboard</span>
                 </a>
+                <a href="/create-task.html" class="nav-item">
+                    <i data-lucide="file-plus"></i>
+                    <span>Create Task</span>
+                </a>
                 <a href="/create-demo.html" class="nav-item">
                     <i data-lucide="plus-square"></i>
                     <span>Create Demo</span>
@@ -215,6 +219,27 @@
                                     <div id="queueNotes" class="queue-notes mt-md"></div>
                                 </div>
                             </section>
+
+                            <!-- Agent Logs Section (for viewing real-time agent output) -->
+                            <section id="agentLogsSection" class="card agent-logs-card hidden">
+                                <div class="card-header flex-between">
+                                    <h3><i data-lucide="terminal"></i> Agent Logs</h3>
+                                    <div class="logs-header-controls">
+                                        <span id="logsCount" class="badge">0 entries</span>
+                                        <button id="toggleLogsBtn" class="btn btn-secondary btn-sm">
+                                            <i data-lucide="chevron-down"></i>
+                                        </button>
+                                        <button id="refreshLogsBtn" class="btn btn-secondary btn-sm" title="Refresh logs">
+                                            <i data-lucide="refresh-cw"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="agentLogsContent" class="agent-logs-content">
+                                    <div class="logs-container" id="logsContainer">
+                                        <div class="log-entry hint">Waiting for agent activity...</div>
+                                    </div>
+                                </div>
+                            </section>
                             
                             <!-- System Prompt Section -->
                             <section id="systemPromptSection" class="card system-prompt-card hidden">
@@ -269,6 +294,9 @@
                                 <div class="card-header flex-between">
                                     <h3><i data-lucide="monitor"></i> Visual Changes</h3>
                                     <div class="screenshot-controls">
+                                        <button id="retryScreenshotsBtn" class="btn btn-warning btn-sm hidden" title="Retry screenshot capture">
+                                            <i data-lucide="rotate-cw"></i> Retry Capture
+                                        </button>
                                         <button id="refreshScreenshotsBtn" class="btn btn-secondary btn-sm" title="Refresh screenshots">
                                             <i data-lucide="refresh-cw"></i>
                                         </button>
@@ -306,10 +334,115 @@
 
                             <!-- Error Section -->
                             <section id="errorSection" class="card error-details-card hidden">
-                                <div class="card-header">
-                                    <h3>Error Details</h3>
+                                <div class="card-header flex-between">
+                                    <div class="error-header-info">
+                                        <h3><i data-lucide="alert-triangle"></i> Error Details</h3>
+                                        <span id="errorCategoryBadge" class="error-category-badge"></span>
+                                    </div>
+                                    <div class="error-header-actions">
+                                        <button id="errorRetryBtn" class="btn btn-primary btn-sm">
+                                            <i data-lucide="refresh-cw"></i> Retry
+                                        </button>
+                                    </div>
                                 </div>
-                                <div id="errorDetails" class="error-content"></div>
+                                <div class="error-body">
+                                    <div id="errorUserMessage" class="error-user-message"></div>
+                                    <div id="errorDetails" class="error-content"></div>
+                                    
+                                    <!-- Error-specific action buttons -->
+                                    <div id="errorActionsContainer" class="error-actions-container hidden">
+                                        <!-- Credit error actions -->
+                                        <div id="creditErrorActions" class="error-action-group hidden">
+                                            <div class="error-countdown-container">
+                                                <span class="countdown-label">Credits may be available in:</span>
+                                                <span id="creditCountdownTimer" class="countdown-timer">--:--</span>
+                                            </div>
+                                            <div class="error-action-buttons">
+                                                <button id="creditWaitRetryBtn" class="btn btn-primary">
+                                                    <i data-lucide="clock"></i> Wait & Auto-Retry
+                                                </button>
+                                                <button id="creditRetryNowBtn" class="btn btn-secondary">
+                                                    <i data-lucide="refresh-cw"></i> Check Credits Now
+                                                </button>
+                                                <a href="/troubleshooting.html#credits" class="btn btn-ghost" target="_blank">
+                                                    <i data-lucide="help-circle"></i> Learn More
+                                                </a>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Network error actions -->
+                                        <div id="networkErrorActions" class="error-action-group hidden">
+                                            <p class="error-hint">Network connectivity issue detected. This may be temporary.</p>
+                                            <div class="error-action-buttons">
+                                                <button id="networkRetryBtn" class="btn btn-primary">
+                                                    <i data-lucide="refresh-cw"></i> Retry Now
+                                                </button>
+                                                <button id="networkAutoRetryBtn" class="btn btn-secondary">
+                                                    <i data-lucide="timer"></i> Auto-Retry (5s)
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Auth error actions -->
+                                        <div id="authErrorActions" class="error-action-group hidden">
+                                            <p class="error-hint">Authentication failed. Your session may have expired.</p>
+                                            <div class="error-action-buttons">
+                                                <a href="/auth/clickup" class="btn btn-primary">
+                                                    <i data-lucide="key"></i> Re-authenticate
+                                                </a>
+                                                <a href="/troubleshooting.html#auth" class="btn btn-ghost" target="_blank">
+                                                    <i data-lucide="help-circle"></i> Help
+                                                </a>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Timeout error actions -->
+                                        <div id="timeoutErrorActions" class="error-action-group hidden">
+                                            <p class="error-hint">The operation took too long. This can happen with complex tasks.</p>
+                                            <div class="error-action-buttons">
+                                                <button id="timeoutRetryBtn" class="btn btn-primary">
+                                                    <i data-lucide="refresh-cw"></i> Retry
+                                                </button>
+                                                <button id="timeoutExtendedBtn" class="btn btn-secondary">
+                                                    <i data-lucide="clock"></i> Retry with Extended Timeout
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Unknown error actions -->
+                                        <div id="unknownErrorActions" class="error-action-group hidden">
+                                            <p class="error-hint">An unexpected error occurred.</p>
+                                            <div class="error-action-buttons">
+                                                <button id="unknownRetryBtn" class="btn btn-primary">
+                                                    <i data-lucide="refresh-cw"></i> Retry Anyway
+                                                </button>
+                                                <button id="viewLogsBtn" class="btn btn-secondary">
+                                                    <i data-lucide="file-text"></i> View Logs
+                                                </button>
+                                                <a href="https://github.com/your-repo/issues/new" class="btn btn-ghost" target="_blank">
+                                                    <i data-lucide="bug"></i> Report Issue
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Technical details (collapsible) -->
+                                    <details id="errorTechnicalDetails" class="error-technical-details">
+                                        <summary>Technical Details</summary>
+                                        <div id="errorStackTrace" class="error-stack-trace"></div>
+                                    </details>
+                                    
+                                    <!-- Auto-retry progress -->
+                                    <div id="autoRetryProgress" class="auto-retry-progress hidden">
+                                        <div class="auto-retry-info">
+                                            <span id="autoRetryText">Auto-retrying in <span id="autoRetryCountdown">5</span>s...</span>
+                                            <button id="cancelAutoRetryBtn" class="btn btn-ghost btn-sm">Cancel</button>
+                                        </div>
+                                        <div class="auto-retry-bar">
+                                            <div id="autoRetryBarFill" class="auto-retry-bar-fill"></div>
+                                        </div>
+                                    </div>
+                                </div>
                             </section>
                         </div>
 
@@ -435,6 +568,55 @@
             <div class="modal-footer">
                 <button id="cancelModelRetry" class="btn btn-secondary">Cancel</button>
                 <button id="confirmModelRetry" class="btn btn-primary">Retry with Selected Model</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Credit Error Modal -->
+    <div id="creditErrorModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title"><i data-lucide="credit-card"></i> Credits Exhausted</h3>
+                <button class="modal-close" id="closeCreditErrorModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="credit-error-content">
+                    <div class="credit-error-icon">
+                        <i data-lucide="alert-circle"></i>
+                    </div>
+                    <p class="credit-error-message">Your Cursor credits have been exhausted. The AI agent cannot continue until credits are available.</p>
+                    
+                    <div class="credit-countdown-display">
+                        <span class="countdown-label">Estimated time until credits reset:</span>
+                        <div id="creditModalCountdown" class="countdown-timer-large">--:--:--</div>
+                    </div>
+                    
+                    <div class="credit-info-box">
+                        <h4><i data-lucide="info"></i> What you can do:</h4>
+                        <ul>
+                            <li><strong>Wait</strong> - Credits typically reset every hour or at midnight</li>
+                            <li><strong>Upgrade</strong> - Consider upgrading your Cursor plan for more credits</li>
+                            <li><strong>Continue Later</strong> - Save your progress and return when credits are available</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer credit-modal-footer">
+                <div class="credit-modal-options">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="creditNotifyWhenAvailable">
+                        <span>Notify me when credits are available</span>
+                    </label>
+                </div>
+                <div class="credit-modal-actions">
+                    <button id="creditModalCancel" class="btn btn-secondary">Continue Later</button>
+                    <button id="creditModalWaitRetry" class="btn btn-primary">
+                        <i data-lucide="clock"></i> Wait & Auto-Retry
+                    </button>
+                    <button id="creditModalRetryNow" class="btn btn-success">
+                        <i data-lucide="refresh-cw"></i> Check Now
+                    </button>
+                </div>
             </div>
         </div>
     </div>

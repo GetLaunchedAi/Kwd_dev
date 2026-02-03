@@ -88,6 +88,10 @@
 
   // Expose globally
   window.APP_CONFIG = config;
+  
+  // Expose API_BASE_URL for scripts that use it directly
+  // This is empty string since API is on the same origin
+  window.API_BASE_URL = '';
 
   // Log environment on load (for debugging)
   console.log(`[KWD Dev] Environment: ${config.environment}, Host: ${hostname}`);

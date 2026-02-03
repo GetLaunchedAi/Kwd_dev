@@ -141,6 +141,284 @@ export async function getStatus(folderPath: string): Promise<any> {
   }
 }
 
+// ============================================
+// Rollback and Recovery Functions
+// ============================================
+
+/**
+ * Commit information for rollback preview
+ */
+export interface CommitInfo {
+  hash: string;
+  shortHash: string;
+  message: string;
+  timestamp: string;
+  author: string;
+}
+
+/**
+ * Rolls back to a specific commit, discarding uncommitted changes.
+ * Uses --hard reset to ensure clean state.
+ * 
+ * @param folderPath - Path to the git repository
+ * @param commitHash - The commit hash to rollback to
+ * @param preserveUntracked - If true, untracked files are kept (default: false)
+ */
+export async function rollbackToCommit(
+  folderPath: string,
+  commitHash: string,
+  preserveUntracked: boolean = false
+): Promise<void> {
+  logger.info(`Rolling back ${folderPath} to commit ${commitHash}`);
+  
+  // FIX: Handle 'initial' placeholder - cannot rollback to a non-existent commit
+  if (!commitHash || commitHash === 'initial') {
+    throw new Error(`Cannot rollback to '${commitHash}': no valid commit hash. The repository may not have had any commits at checkpoint time.`);
+  }
+  
+  const git: SimpleGit = simpleGit(folderPath);
+  
+  try {
+    // Verify the commit exists
+    try {
+      await git.catFile(['-t', commitHash]);
+    } catch (err) {
+      throw new Error(`Commit ${commitHash} does not exist or is unreachable`);
+    }
+    
+    if (!preserveUntracked) {
+      // Clean untracked files
+      await git.clean('fd');
+    }
+    
+    // Hard reset to the commit
+    await git.reset(['--hard', commitHash]);
+    
+    logger.info(`Successfully rolled back to commit ${commitHash}`);
+  } catch (error: any) {
+    logger.error(`Error rolling back to commit ${commitHash}: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Creates a safety tag before rollback for manual recovery.
+ * This allows recovery if something goes wrong during rollback.
+ * 
+ * @param folderPath - Path to the git repository
+ * @param tagName - Name for the safety tag
+ * @param message - Tag message describing what's being preserved
+ * 
+ * FIX: Added handling for repos with no commits
+ */
+export async function createSafetyTag(
+  folderPath: string,
+  tagName: string,
+  message: string
+): Promise<string> {
+  logger.info(`Creating safety tag ${tagName} in ${folderPath}`);
+  
+  const git: SimpleGit = simpleGit(folderPath);
+  
+  try {
+    // FIX: Check if there are any commits first
+    // Cannot create tags in repos with no commits
+    try {
+      await git.revparse(['HEAD']);
+    } catch (revErr: any) {
+      const errMsg = revErr.message?.toLowerCase() || '';
+      if (errMsg.includes('unknown revision') || errMsg.includes('ambiguous argument')) {
+        logger.warn(`Cannot create safety tag in ${folderPath}: repository has no commits`);
+        return 'initial'; // Return placeholder instead of throwing
+      }
+      throw revErr;
+    }
+    
+    // Sanitize tag name - Git tag names have restrictions
+    const sanitizedTagName = tagName.replace(/[^a-zA-Z0-9._/-]/g, '-');
+    
+    // Create an annotated tag at current HEAD
+    await git.tag(['-a', sanitizedTagName, '-m', message, 'HEAD']);
+    
+    // Get the commit hash that was tagged
+    const hash = (await git.revparse(['HEAD'])).trim();
+    
+    logger.info(`Created safety tag ${sanitizedTagName} at commit ${hash}`);
+    
+    return hash;
+  } catch (error: any) {
+    // If tag already exists, try with a timestamp suffix
+    if (error.message?.includes('already exists')) {
+      const sanitizedTagName = tagName.replace(/[^a-zA-Z0-9._/-]/g, '-');
+      const timestampTag = `${sanitizedTagName}-${Date.now()}`;
+      logger.warn(`Tag ${tagName} exists, creating ${timestampTag} instead`);
+      
+      await git.tag(['-a', timestampTag, '-m', message, 'HEAD']);
+      const hash = (await git.revparse(['HEAD'])).trim();
+      
+      return hash;
+    }
+    
+    logger.error(`Error creating safety tag: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Gets list of commits since a checkpoint.
+ * Useful for showing user what will be lost on rollback.
+ * 
+ * @param folderPath - Path to the git repository
+ * @param sinceCommit - The commit hash to start from (exclusive)
+ * @param maxCommits - Maximum number of commits to return (default: 50)
+ */
+export async function getCommitsSince(
+  folderPath: string,
+  sinceCommit: string,
+  maxCommits: number = 50
+): Promise<CommitInfo[]> {
+  logger.debug(`Getting commits since ${sinceCommit} in ${folderPath}`);
+  
+  // FIX: Handle 'initial' placeholder proactively before attempting git operations
+  // This prevents unnecessary error handling and provides clearer behavior
+  if (sinceCommit === 'initial') {
+    logger.debug(`Commit placeholder 'initial' detected, returning empty commit list`);
+    return [];
+  }
+  
+  const git: SimpleGit = simpleGit(folderPath);
+  
+  try {
+    // Get log from sinceCommit to HEAD
+    const log = await git.log({
+      from: sinceCommit,
+      to: 'HEAD',
+      maxCount: maxCommits
+    });
+    
+    return log.all.map(commit => ({
+      hash: commit.hash,
+      shortHash: commit.hash.substring(0, 7),
+      message: commit.message,
+      timestamp: commit.date,
+      author: commit.author_name
+    }));
+  } catch (error: any) {
+    logger.error(`Error getting commits since ${sinceCommit}: ${error.message}`);
+    
+    // FIX: Handle multiple error patterns that indicate invalid/missing commits
+    // Git can return different error messages depending on the scenario
+    const errorMsg = error.message.toLowerCase();
+    if (errorMsg.includes('unknown revision') || 
+        errorMsg.includes('bad revision') ||
+        errorMsg.includes('invalid object') ||
+        errorMsg.includes('not a valid object name') ||
+        errorMsg.includes('ambiguous argument')) {
+      logger.debug(`Commit ${sinceCommit} not found or invalid, returning empty commit list`);
+      return [];
+    }
+    
+    throw error;
+  }
+}
+
+/**
+ * Gets the current HEAD commit hash.
+ * 
+ * FIX: Returns 'initial' placeholder if no commits exist yet (new repo)
+ * This is consistent with checkpoint handling and prevents crashes on fresh repos.
+ */
+export async function getCurrentCommitHash(folderPath: string): Promise<string> {
+  const git: SimpleGit = simpleGit(folderPath);
+  
+  try {
+    const hash = (await git.revparse(['HEAD'])).trim();
+    return hash;
+  } catch (error: any) {
+    // FIX: Handle "no commits yet" case gracefully
+    // Git throws "ambiguous argument 'HEAD': unknown revision" for repos with no commits
+    const errorMsg = error.message?.toLowerCase() || '';
+    if (errorMsg.includes('unknown revision') || 
+        errorMsg.includes('bad revision') ||
+        errorMsg.includes('ambiguous argument')) {
+      logger.warn(`Repository at ${folderPath} has no commits yet, returning 'initial' placeholder`);
+      return 'initial';
+    }
+    logger.error(`Error getting current commit hash: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Checks if there are uncommitted changes in the working directory.
+ */
+export async function hasUncommittedChanges(folderPath: string): Promise<boolean> {
+  const git: SimpleGit = simpleGit(folderPath);
+  
+  try {
+    const status = await git.status();
+    return !status.isClean();
+  } catch (error: any) {
+    logger.error(`Error checking uncommitted changes: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Stashes any uncommitted changes before a rollback operation.
+ * Returns the stash message if something was stashed, null otherwise.
+ */
+export async function stashChanges(
+  folderPath: string,
+  message: string
+): Promise<string | null> {
+  const git: SimpleGit = simpleGit(folderPath);
+  
+  try {
+    const status = await git.status();
+    
+    if (status.isClean()) {
+      return null;
+    }
+    
+    await git.stash(['push', '-m', message, '--include-untracked']);
+    logger.info(`Stashed changes: ${message}`);
+    
+    return message;
+  } catch (error: any) {
+    logger.error(`Error stashing changes: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Gets files that changed between two commits.
+ * Useful for showing what will be affected by rollback.
+ */
+export async function getChangedFiles(
+  folderPath: string,
+  fromCommit: string,
+  toCommit: string = 'HEAD'
+): Promise<string[]> {
+  const git: SimpleGit = simpleGit(folderPath);
+  
+  // FIX: Handle 'initial' placeholder to avoid git errors
+  if (fromCommit === 'initial') {
+    logger.debug(`Commit placeholder 'initial' detected in getChangedFiles, returning empty list`);
+    return [];
+  }
+  
+  try {
+    const diff = await git.diffSummary([fromCommit, toCommit]);
+    return diff.files.map(f => f.file);
+  } catch (error: any) {
+    // FIX: Log the error clearly but return empty to avoid breaking rollback preview
+    // Include context about what failed so issues can be diagnosed
+    logger.warn(`Could not get changed files from ${fromCommit} to ${toCommit}: ${error.message}. Rollback preview will show 0 files.`);
+    return [];
+  }
+}
+
 
 
 

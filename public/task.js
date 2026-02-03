@@ -107,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     loadTaskDetails();
     loadDiff();
+    loadAgentLogs();
     startConnectionPolling();
     loadAvailableModels();
     
@@ -123,6 +124,40 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('refreshTaskBtn')?.addEventListener('click', () => {
         loadTaskDetails({ showNotification: true });
         loadDiff({ showNotification: true });
+        loadAgentLogs(false);
+    });
+
+    // Retry screenshots button
+    document.getElementById('retryScreenshotsBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('retryScreenshotsBtn');
+        if (!btn || btn.disabled) return; // Prevent double-clicks
+        
+        btn.disabled = true;
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Retrying...';
+        if (window.lucide) lucide.createIcons();
+        
+        try {
+            const response = await api.post(`/tasks/${taskId}/retry-screenshots`, {});
+            if (response.success) {
+                notifications.success('Screenshot capture restarted');
+                btn.classList.add('hidden');
+                // Trigger immediate re-render to show progress indicator
+                await renderScreenshots();
+            } else {
+                // Re-enable button on error so user can try again
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+                if (window.lucide) lucide.createIcons();
+                notifications.error(response.error || 'Failed to retry screenshots');
+            }
+        } catch (err) {
+            // Re-enable button on error so user can try again
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+            if (window.lucide) lucide.createIcons();
+            notifications.error(`Error: ${err.message}`);
+        }
     });
 
     // Description edit buttons
@@ -204,6 +239,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Agent Feedback handlers
     setupAgentFeedbackHandlers();
 
+    // Agent Logs controls
+    setupLogsControls();
+
     // Scroll to top button - use passive listener for better scroll performance
     const scrollBtn = document.getElementById('scrollToTopBtn');
     let scrollTicking = false;
@@ -234,6 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Trigger immediate refresh when returning to tab
                 loadTaskDetails({ silent: true });
                 loadDiff({ silent: true });
+                loadAgentLogs(true);
             }
         } else {
             // Tab hidden - stop timer to save resources but keep state
@@ -284,11 +323,25 @@ async function loadTaskDetails(options = {}) {
         // Check if data has changed using deep equality
         const hasChanged = !deepEqual(data, taskData);
         
+        // Track screenshot capture status changes for smart polling
+        const prevCapturing = taskData?.taskState?.metadata?.capturingScreenshots;
+        const nowCapturing = data?.taskState?.metadata?.capturingScreenshots;
+        
         if (hasChanged || !silent) {
             taskData = data;
             
             renderTaskDetails();
             renderTimeline();
+            
+            // Re-render screenshots if capture status changed (especially when it finishes)
+            if (prevCapturing !== nowCapturing) {
+                if (prevCapturing && !nowCapturing) {
+                    // Screenshots just finished capturing
+                    console.log('Screenshot capture completed, refreshing gallery');
+                }
+                // Always re-render when capture status changes
+                renderScreenshots();
+            }
             
             if (!silent) {
                 loading.classList.add('hidden');
@@ -371,6 +424,117 @@ async function loadQueueStatus(silent = false) {
     }
 }
 
+let logsCollapsed = false;
+let lastLogsLength = 0;
+
+async function loadAgentLogs(silent = false) {
+    const section = document.getElementById('agentLogsSection');
+    const container = document.getElementById('logsContainer');
+    const countBadge = document.getElementById('logsCount');
+    
+    if (!section || !container) return;
+    
+    // Only show logs for active states
+    const activeStates = ['pending', 'in_progress', 'testing'];
+    const showSection = taskData?.taskState && activeStates.includes(taskData.taskState.state);
+    
+    if (!showSection) {
+        // Keep section visible for recently finished tasks (within 30s)
+        const updatedAt = taskData?.taskState?.updatedAt;
+        const recentlyFinished = updatedAt && (Date.now() - new Date(updatedAt).getTime()) < 30000;
+        if (!recentlyFinished) {
+            section.classList.add('hidden');
+            return;
+        }
+    }
+    
+    try {
+        const response = await api.get(`/tasks/${taskId}/logs?tail=100`);
+        
+        if (!response || response.length === 0) {
+            // Show section but with waiting message
+            section.classList.remove('hidden');
+            if (!silent || container.querySelector('.hint')) {
+                container.innerHTML = '<div class="log-entry hint">Waiting for agent activity...</div>';
+            }
+            if (countBadge) countBadge.textContent = '0 entries';
+            return;
+        }
+        
+        section.classList.remove('hidden');
+        
+        // Only update if logs have changed (by length check for performance)
+        if (response.length !== lastLogsLength || !silent) {
+            lastLogsLength = response.length;
+            
+            // Build logs HTML
+            const logsHtml = response.map(log => {
+                const timestamp = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
+                const message = log.line || log.message || log.step || JSON.stringify(log);
+                
+                // Determine log type for styling
+                let logClass = '';
+                const msgLower = message.toLowerCase();
+                
+                if (msgLower.includes('error') || msgLower.includes('failed')) {
+                    logClass = 'error';
+                } else if (msgLower.includes('complete') || msgLower.includes('success') || msgLower.includes('✓')) {
+                    logClass = 'success';
+                } else if (msgLower.includes('step') && (msgLower.includes('complete') || msgLower.includes('finished'))) {
+                    logClass = 'step-complete';
+                } else if (msgLower.includes('warning') || msgLower.includes('warn')) {
+                    logClass = 'warning';
+                } else if (msgLower.includes('starting') || msgLower.includes('processing')) {
+                    logClass = 'info';
+                }
+                
+                return `<div class="log-entry ${logClass}"><span class="timestamp">${timestamp}</span>${FormattingUtils.escapeHtml(message)}</div>`;
+            }).join('');
+            
+            container.innerHTML = logsHtml;
+            
+            // Update count badge
+            if (countBadge) {
+                countBadge.textContent = `${response.length} ${response.length === 1 ? 'entry' : 'entries'}`;
+            }
+            
+            // Auto-scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+    } catch (err) {
+        console.error('Error loading agent logs:', err);
+        // Don't hide the section on error, just log it
+    }
+}
+
+function setupLogsControls() {
+    const toggleBtn = document.getElementById('toggleLogsBtn');
+    const refreshBtn = document.getElementById('refreshLogsBtn');
+    const content = document.getElementById('agentLogsContent');
+    
+    toggleBtn?.addEventListener('click', () => {
+        logsCollapsed = !logsCollapsed;
+        content?.classList.toggle('collapsed', logsCollapsed);
+        
+        const icon = toggleBtn.querySelector('i');
+        if (icon) {
+            icon.setAttribute('data-lucide', logsCollapsed ? 'chevron-right' : 'chevron-down');
+            if (window.lucide) lucide.createIcons();
+        }
+    });
+    
+    refreshBtn?.addEventListener('click', async () => {
+        refreshBtn.disabled = true;
+        refreshBtn.querySelector('i')?.classList.add('animate-spin');
+        
+        await loadAgentLogs(false);
+        
+        refreshBtn.disabled = false;
+        refreshBtn.querySelector('i')?.classList.remove('animate-spin');
+        notifications.success('Logs refreshed');
+    });
+}
+
 async function loadDiff(options = {}) {
     // Handle both old and new signature
     const showNotification = typeof options === 'boolean' ? options : (options.showNotification || false);
@@ -450,6 +614,7 @@ function startAutoRefresh() {
         try {
             await loadTaskDetails({ silent: true });
             await loadQueueStatus(true);
+            await loadAgentLogs(true);
             
             // Decoupled diff polling (Path 3 optimization)
             // Only poll diff in in_progress or testing states
@@ -556,15 +721,35 @@ function renderTaskDetails() {
     document.getElementById('clientName').textContent = taskInfo.clientName || 'N/A';
     document.getElementById('branchName').textContent = taskState.branchName || 'N/A';
     
-    // Setup ClickUp link
+    // Setup ClickUp link (hide for local tasks)
     const link = document.getElementById('clickUpUrl');
+    const isLocalTask = taskId && taskId.startsWith('local-');
     if (link) {
-        let clickUpUrl = taskInfo.task?.url;
-        if (!clickUpUrl || clickUpUrl === '#' || clickUpUrl.trim() === '') {
-            clickUpUrl = `https://app.clickup.com/t/${taskId}`;
+        if (isLocalTask) {
+            // Hide ClickUp link for local tasks
+            link.closest('.meta-item')?.classList.add('hidden');
+        } else {
+            link.closest('.meta-item')?.classList.remove('hidden');
+            let clickUpUrl = taskInfo.task?.url;
+            if (!clickUpUrl || clickUpUrl === '#' || clickUpUrl.trim() === '') {
+                clickUpUrl = `https://app.clickup.com/t/${taskId}`;
+            }
+            link.setAttribute('href', clickUpUrl);
+            link.textContent = 'View Task ↗';
         }
-        link.setAttribute('href', clickUpUrl);
-        link.textContent = 'View Task ↗';
+    }
+    
+    // Add local task badge to header if this is a local task
+    const stateBadgeContainer = document.querySelector('.task-title-group');
+    if (stateBadgeContainer && isLocalTask) {
+        // Check if badge already exists
+        if (!stateBadgeContainer.querySelector('.local-task-badge')) {
+            const localBadge = document.createElement('span');
+            localBadge.className = 'local-task-badge';
+            localBadge.textContent = 'Local Task';
+            localBadge.title = 'This task was created locally, not imported from ClickUp';
+            stateBadgeContainer.insertBefore(localBadge, stateBadgeContainer.firstChild);
+        }
     }
     
     document.getElementById('createdAt').textContent = FormattingUtils.formatDate(taskState.createdAt);
@@ -611,15 +796,8 @@ function renderTaskDetails() {
         }
     }
     
-    // Show error section if error state
-    const errorSection = document.getElementById('errorSection');
-    const errorDetails = document.getElementById('errorDetails');
-    if (taskState.state === 'error' && taskState.error) {
-        if (errorSection) errorSection.classList.remove('hidden');
-        if (errorDetails) errorDetails.textContent = taskState.error;
-    } else {
-        if (errorSection) errorSection.classList.add('hidden');
-    }
+    // Show enhanced error section if error state
+    renderErrorSection(taskState);
 
     // Visual Changes / Screenshots
     renderScreenshots();
@@ -683,14 +861,127 @@ function renderDemoProgress() {
 
 let gallery = null;
 let screenshotRefreshBtnInitialized = false;
+let screenshotPollingTimer = null; // Prevent multiple polling loops
+let isRenderingScreenshots = false; // Prevent concurrent renders
 
-function renderScreenshots() {
+// Helper function to escape HTML to prevent XSS
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function checkScreenshotStatus(taskId) {
+    if (!taskId) {
+        console.warn('checkScreenshotStatus called with invalid taskId');
+        return { capturing: false, phase: 'before', progress: 0 };
+    }
+    
+    try {
+        const response = await api.get(`/tasks/${taskId}/screenshot-status`);
+        // Validate response structure
+        return {
+            capturing: Boolean(response?.capturing),
+            phase: response?.phase || 'before',
+            progress: typeof response?.progress === 'number' ? response.progress : 0
+        };
+    } catch (err) {
+        console.error('Error checking screenshot status:', err);
+        return { capturing: false, phase: 'before', progress: 0 };
+    }
+}
+
+async function renderScreenshots() {
+    // Prevent concurrent renders
+    if (isRenderingScreenshots) {
+        return;
+    }
+    
     if (!taskData) return;
     
     const visualChangesSection = document.getElementById('visualChangesSection');
     const galleryContainer = document.getElementById('screenshotGalleryContainer');
     
     if (!visualChangesSection || !galleryContainer) return;
+    
+    isRenderingScreenshots = true;
+    
+    try {
+
+    // For demo step tasks (e.g., demo-slug-step2), screenshots are stored under
+    // the base demo taskId (demo-slug), not the step-specific ID
+    let screenshotTaskId = taskId;
+    const stepMatch = taskId.match(/^(demo-.+)-step\d+$/);
+    if (stepMatch) {
+        screenshotTaskId = stepMatch[1]; // Use base demo taskId for screenshots
+    }
+
+    // Check if screenshots are currently being captured
+    const status = await checkScreenshotStatus(screenshotTaskId);
+    
+    if (status.capturing) {
+        // Show progress indicator instead of empty gallery
+        const safePhase = escapeHtml(status.phase || 'screenshots');
+        const safeProgress = Math.min(100, Math.max(0, status.progress || 0)); // Clamp 0-100
+        
+        galleryContainer.innerHTML = `
+            <div class="screenshot-capturing-indicator" style="text-align: center; padding: 3rem; background: var(--bg-secondary); border-radius: 8px; margin: 1rem 0;">
+                <div style="display: inline-block; width: 40px; height: 40px; border: 4px solid var(--border-color); border-top-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 1rem;"></div>
+                <p style="font-size: 1.1rem; font-weight: 500; margin-bottom: 0.5rem;">Capturing ${safePhase}...</p>
+                <div style="max-width: 400px; margin: 1rem auto; background: var(--bg-tertiary); border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: var(--primary-color); height: 100%; width: ${safeProgress}%; transition: width 0.3s ease;"></div>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">This may take 1-2 minutes for large sites</p>
+            </div>
+        `;
+        
+        // Clear any existing polling timer to prevent multiple loops
+        if (screenshotPollingTimer) {
+            clearTimeout(screenshotPollingTimer);
+        }
+        
+        // Poll again in 3 seconds (release lock before scheduling to avoid blocking)
+        screenshotPollingTimer = setTimeout(() => {
+            screenshotPollingTimer = null;
+            isRenderingScreenshots = false; // Reset flag before next call
+            renderScreenshots();
+        }, 3000);
+        return;
+    }
+    
+    // Clear polling timer if we're not capturing anymore
+    if (screenshotPollingTimer) {
+        clearTimeout(screenshotPollingTimer);
+        screenshotPollingTimer = null;
+    }
+    
+    // Check if screenshots failed and show error message
+    if (taskData?.taskState?.screenshotCaptureSuccess === false) {
+        const retryBtn = document.getElementById('retryScreenshotsBtn');
+        if (retryBtn) {
+            retryBtn.classList.remove('hidden');
+        }
+        
+        // Escape error message to prevent XSS
+        const safeError = escapeHtml(taskData.taskState.screenshotError || 'Unknown error');
+        
+        // Show error message in gallery
+        galleryContainer.innerHTML = `
+            <div class="screenshot-error" style="text-align: center; padding: 3rem; background: var(--bg-secondary); border-radius: 8px; margin: 1rem 0; border: 1px solid var(--error-color);">
+                <i data-lucide="alert-circle" style="width: 48px; height: 48px; color: var(--error-color); margin-bottom: 1rem;"></i>
+                <p style="font-size: 1.1rem; font-weight: 500; margin-bottom: 0.5rem; color: var(--error-color);">Screenshot capture failed</p>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.5rem;">${safeError}</p>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">Click "Retry Capture" above to try again</p>
+            </div>
+        `;
+        
+        // Reinitialize Lucide icons for the error icon
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        return;
+    }
 
     // Initialize gallery if not already done
     if (!gallery) {
@@ -703,16 +994,14 @@ function renderScreenshots() {
         });
     }
     
-    // For demo step tasks (e.g., demo-slug-step2), screenshots are stored under
-    // the base demo taskId (demo-slug), not the step-specific ID
-    let screenshotTaskId = taskId;
-    const stepMatch = taskId.match(/^(demo-.+)-step\d+$/);
-    if (stepMatch) {
-        screenshotTaskId = stepMatch[1]; // Use base demo taskId for screenshots
-    }
-    
     // Load screenshots from the API
     gallery.loadScreenshots(screenshotTaskId);
+    
+    // Hide retry button if screenshots are successful
+    const retryBtn = document.getElementById('retryScreenshotsBtn');
+    if (retryBtn) {
+        retryBtn.classList.add('hidden');
+    }
     
     // Setup refresh button (only once, using module-level flag instead of DOM property)
     const refreshBtn = document.getElementById('refreshScreenshotsBtn');
@@ -732,6 +1021,21 @@ function renderScreenshots() {
                 refreshBtn.querySelector('i')?.classList.remove('animate-spin');
             }
         });
+    }
+    
+    } catch (err) {
+        console.error('Error in renderScreenshots:', err);
+        // Show error in UI
+        if (galleryContainer) {
+            galleryContainer.innerHTML = `
+                <div style="text-align: center; padding: 2rem; color: var(--error-color);">
+                    <p>Error loading screenshots</p>
+                </div>
+            `;
+        }
+    } finally {
+        // Always reset the rendering flag
+        isRenderingScreenshots = false;
     }
 }
 
@@ -1848,3 +2152,591 @@ function updateFeedbackSectionState() {
         submitBtn?.removeAttribute('title');
     }
 }
+
+// ============================================
+// Error Recovery System
+// ============================================
+
+/**
+ * Error category definitions with display info and recovery options
+ */
+const ERROR_CATEGORIES = {
+    credit_limit: {
+        label: 'Credits Exhausted',
+        icon: 'credit-card',
+        className: 'credit',
+        recoverable: true,
+        suggestedWait: 60 * 60 * 1000, // 1 hour default
+        maxRetries: 1,
+        autoRetry: false
+    },
+    model_error: {
+        label: 'Model Unavailable',
+        icon: 'cpu',
+        className: 'model',
+        recoverable: true,
+        suggestedWait: 0,
+        maxRetries: 3,
+        autoRetry: false
+    },
+    auth_error: {
+        label: 'Authentication Failed',
+        icon: 'key',
+        className: 'auth',
+        recoverable: true,
+        suggestedWait: 0,
+        maxRetries: 0,
+        autoRetry: false
+    },
+    network_error: {
+        label: 'Network Error',
+        icon: 'wifi-off',
+        className: 'network',
+        recoverable: true,
+        suggestedWait: 5000,
+        maxRetries: 3,
+        autoRetry: true,
+        backoff: [5000, 10000, 30000]
+    },
+    timeout: {
+        label: 'Request Timeout',
+        icon: 'clock',
+        className: 'timeout',
+        recoverable: true,
+        suggestedWait: 0,
+        maxRetries: 2,
+        autoRetry: true,
+        backoff: [5000, 15000]
+    },
+    unknown: {
+        label: 'Unexpected Error',
+        icon: 'alert-triangle',
+        className: 'unknown',
+        recoverable: true,
+        suggestedWait: 0,
+        maxRetries: 1,
+        autoRetry: false
+    }
+};
+
+// Retry state management
+let retryState = {
+    taskId: null,
+    errorCategory: null,
+    retryCount: 0,
+    lastErrorTime: null,
+    autoRetryTimer: null,
+    countdownTimer: null,
+    suggestedRetryTime: null
+};
+
+/**
+ * Loads retry state from localStorage
+ */
+function loadRetryState() {
+    try {
+        const stored = localStorage.getItem(`retryState_${taskId}`);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            // Only restore if same task and error is recent (within 24 hours)
+            if (parsed.taskId === taskId && 
+                parsed.lastErrorTime && 
+                Date.now() - parsed.lastErrorTime < 24 * 60 * 60 * 1000) {
+                retryState = { ...retryState, ...parsed };
+                console.log('Restored retry state:', retryState);
+            }
+        }
+    } catch (err) {
+        console.warn('Failed to load retry state:', err);
+    }
+}
+
+/**
+ * Saves retry state to localStorage
+ */
+function saveRetryState() {
+    try {
+        localStorage.setItem(`retryState_${taskId}`, JSON.stringify({
+            taskId: retryState.taskId,
+            errorCategory: retryState.errorCategory,
+            retryCount: retryState.retryCount,
+            lastErrorTime: retryState.lastErrorTime,
+            suggestedRetryTime: retryState.suggestedRetryTime
+        }));
+    } catch (err) {
+        console.warn('Failed to save retry state:', err);
+    }
+}
+
+/**
+ * Clears retry state
+ */
+function clearRetryState() {
+    retryState = {
+        taskId: null,
+        errorCategory: null,
+        retryCount: 0,
+        lastErrorTime: null,
+        autoRetryTimer: null,
+        countdownTimer: null,
+        suggestedRetryTime: null
+    };
+    try {
+        localStorage.removeItem(`retryState_${taskId}`);
+    } catch (err) {
+        console.warn('Failed to clear retry state:', err);
+    }
+}
+
+/**
+ * Detects error category from task state
+ * @param {object} taskState 
+ * @returns {string} Error category key
+ */
+function detectErrorCategory(taskState) {
+    if (!taskState) return 'unknown';
+    
+    // Check explicit flags first
+    if (taskState.creditError || taskState.errorCategory === 'credit_limit') {
+        return 'credit_limit';
+    }
+    if (taskState.modelError || taskState.errorCategory === 'model_error') {
+        return 'model_error';
+    }
+    if (taskState.errorCategory) {
+        return taskState.errorCategory;
+    }
+    
+    // Infer from error message if no explicit category
+    const errorMsg = (taskState.error || '').toLowerCase();
+    
+    if (errorMsg.includes('credit') || errorMsg.includes('usage limit') || 
+        errorMsg.includes('rate limit') || errorMsg.includes('quota')) {
+        return 'credit_limit';
+    }
+    if (errorMsg.includes('model') || errorMsg.includes('unavailable') ||
+        errorMsg.includes('capacity')) {
+        return 'model_error';
+    }
+    if (errorMsg.includes('auth') || errorMsg.includes('unauthorized') ||
+        errorMsg.includes('forbidden') || errorMsg.includes('token')) {
+        return 'auth_error';
+    }
+    if (errorMsg.includes('network') || errorMsg.includes('connection') ||
+        errorMsg.includes('econnrefused') || errorMsg.includes('enotfound')) {
+        return 'network_error';
+    }
+    if (errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
+        return 'timeout';
+    }
+    
+    return 'unknown';
+}
+
+/**
+ * Renders the enhanced error section with category-specific UI
+ * @param {object} taskState 
+ */
+function renderErrorSection(taskState) {
+    const errorSection = document.getElementById('errorSection');
+    const errorCategoryBadge = document.getElementById('errorCategoryBadge');
+    const errorUserMessage = document.getElementById('errorUserMessage');
+    const errorDetails = document.getElementById('errorDetails');
+    const errorActionsContainer = document.getElementById('errorActionsContainer');
+    const errorStackTrace = document.getElementById('errorStackTrace');
+    
+    if (!errorSection || !taskState || taskState.state !== 'error') {
+        if (errorSection) errorSection.classList.add('hidden');
+        clearAutoRetryTimers();
+        return;
+    }
+    
+    // Detect and store error category
+    const category = detectErrorCategory(taskState);
+    const categoryInfo = ERROR_CATEGORIES[category] || ERROR_CATEGORIES.unknown;
+    
+    // Update retry state
+    if (retryState.errorCategory !== category || retryState.taskId !== taskId) {
+        retryState.taskId = taskId;
+        retryState.errorCategory = category;
+        retryState.lastErrorTime = Date.now();
+        
+        // Calculate suggested retry time for credit errors
+        if (category === 'credit_limit') {
+            retryState.suggestedRetryTime = Date.now() + categoryInfo.suggestedWait;
+        }
+        
+        saveRetryState();
+    }
+    
+    // Show error section
+    errorSection.classList.remove('hidden');
+    
+    // Update category badge
+    if (errorCategoryBadge) {
+        errorCategoryBadge.innerHTML = `<i data-lucide="${categoryInfo.icon}"></i> ${categoryInfo.label}`;
+        errorCategoryBadge.className = `error-category-badge ${categoryInfo.className}`;
+    }
+    
+    // User-friendly message
+    const userMessage = taskState.userMessage || getDefaultUserMessage(category);
+    if (errorUserMessage) {
+        errorUserMessage.textContent = userMessage;
+    }
+    
+    // Technical error details
+    if (errorDetails) {
+        errorDetails.textContent = taskState.error || 'No additional details available.';
+    }
+    
+    // Stack trace (if available)
+    if (errorStackTrace) {
+        if (taskState.stackTrace || taskState.stderr) {
+            errorStackTrace.textContent = taskState.stackTrace || taskState.stderr;
+            errorStackTrace.parentElement.classList.remove('hidden');
+        } else {
+            errorStackTrace.parentElement.classList.add('hidden');
+        }
+    }
+    
+    // Show appropriate action group
+    showErrorActions(category);
+    if (errorActionsContainer) {
+        errorActionsContainer.classList.remove('hidden');
+    }
+    
+    // Setup error action handlers
+    setupErrorActionHandlers(category);
+    
+    // Start auto-retry for transient errors if applicable
+    if (categoryInfo.autoRetry && retryState.retryCount < categoryInfo.maxRetries) {
+        startAutoRetry(category);
+    }
+    
+    // Start countdown for credit errors
+    if (category === 'credit_limit' && retryState.suggestedRetryTime) {
+        startCreditCountdown();
+    }
+    
+    // Refresh icons
+    if (window.lucide) lucide.createIcons();
+}
+
+/**
+ * Gets default user-friendly message for error category
+ */
+function getDefaultUserMessage(category) {
+    const messages = {
+        credit_limit: 'Your Cursor credits have been exhausted. Please wait for credits to reset or upgrade your plan.',
+        model_error: 'The AI model is currently unavailable. Please try a different model.',
+        auth_error: 'Your authentication has expired. Please re-authenticate to continue.',
+        network_error: 'A network error occurred. Please check your connection and try again.',
+        timeout: 'The request timed out. This may happen with complex tasks.',
+        unknown: 'An unexpected error occurred. You can try again or report this issue.'
+    };
+    return messages[category] || messages.unknown;
+}
+
+/**
+ * Shows the appropriate error action group
+ */
+function showErrorActions(category) {
+    // Hide all action groups
+    const actionGroups = [
+        'creditErrorActions',
+        'networkErrorActions',
+        'authErrorActions',
+        'timeoutErrorActions',
+        'unknownErrorActions'
+    ];
+    actionGroups.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+    
+    // Show the relevant action group
+    const groupMap = {
+        credit_limit: 'creditErrorActions',
+        model_error: 'unknownErrorActions', // Uses model modal instead
+        auth_error: 'authErrorActions',
+        network_error: 'networkErrorActions',
+        timeout: 'timeoutErrorActions',
+        unknown: 'unknownErrorActions'
+    };
+    
+    const targetGroup = document.getElementById(groupMap[category]);
+    if (targetGroup) {
+        targetGroup.classList.remove('hidden');
+    }
+}
+
+/**
+ * Sets up event handlers for error action buttons
+ */
+function setupErrorActionHandlers(category) {
+    // Main retry button
+    const retryBtn = document.getElementById('errorRetryBtn');
+    retryBtn?.addEventListener('click', () => handleRetryTask(), { once: true });
+    
+    // Credit error actions
+    document.getElementById('creditWaitRetryBtn')?.addEventListener('click', () => {
+        showCreditErrorModal();
+    }, { once: true });
+    
+    document.getElementById('creditRetryNowBtn')?.addEventListener('click', () => {
+        handleRetryTask();
+    }, { once: true });
+    
+    // Network error actions
+    document.getElementById('networkRetryBtn')?.addEventListener('click', () => {
+        handleRetryTask();
+    }, { once: true });
+    
+    document.getElementById('networkAutoRetryBtn')?.addEventListener('click', () => {
+        startAutoRetry('network_error');
+    }, { once: true });
+    
+    // Timeout error actions
+    document.getElementById('timeoutRetryBtn')?.addEventListener('click', () => {
+        handleRetryTask();
+    }, { once: true });
+    
+    document.getElementById('timeoutExtendedBtn')?.addEventListener('click', () => {
+        handleRetryTask({ extendedTimeout: true });
+    }, { once: true });
+    
+    // Unknown error actions
+    document.getElementById('unknownRetryBtn')?.addEventListener('click', () => {
+        handleRetryTask();
+    }, { once: true });
+    
+    document.getElementById('viewLogsBtn')?.addEventListener('click', () => {
+        // Scroll to and expand technical details
+        const details = document.getElementById('errorTechnicalDetails');
+        if (details) {
+            details.open = true;
+            details.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, { once: true });
+    
+    // Auto-retry cancel
+    document.getElementById('cancelAutoRetryBtn')?.addEventListener('click', () => {
+        clearAutoRetryTimers();
+        hideAutoRetryProgress();
+    }, { once: true });
+}
+
+/**
+ * Handles retry task with error-type-specific logic
+ */
+async function handleRetryTask(options = {}) {
+    const categoryInfo = ERROR_CATEGORIES[retryState.errorCategory] || ERROR_CATEGORIES.unknown;
+    
+    // Check if we've exceeded max retries
+    if (retryState.retryCount >= categoryInfo.maxRetries && categoryInfo.maxRetries > 0) {
+        notifications.warning(`Maximum retry attempts (${categoryInfo.maxRetries}) reached. Please try again later.`);
+        return;
+    }
+    
+    // For model errors, show the model selection modal
+    if (retryState.errorCategory === 'model_error') {
+        const failedModel = taskData?.taskState?.metadata?.failedModel || 
+                           document.getElementById('agentModelSelect')?.value;
+        showModelErrorModal(failedModel);
+        return;
+    }
+    
+    // For auth errors, redirect to auth
+    if (retryState.errorCategory === 'auth_error') {
+        window.location.href = '/auth/clickup';
+        return;
+    }
+    
+    // Increment retry count
+    retryState.retryCount++;
+    saveRetryState();
+    
+    // Clear any pending auto-retry
+    clearAutoRetryTimers();
+    
+    // Trigger the agent
+    try {
+        await handleTriggerAgent();
+        
+        // If successful, clear retry state
+        clearRetryState();
+    } catch (err) {
+        console.error('Retry failed:', err);
+        // Don't clear state - let error handling update it
+    }
+}
+
+/**
+ * Starts auto-retry with exponential backoff
+ */
+function startAutoRetry(category) {
+    const categoryInfo = ERROR_CATEGORIES[category] || ERROR_CATEGORIES.unknown;
+    
+    if (!categoryInfo.autoRetry || !categoryInfo.backoff) return;
+    if (retryState.retryCount >= categoryInfo.maxRetries) return;
+    
+    const delay = categoryInfo.backoff[retryState.retryCount] || categoryInfo.backoff[categoryInfo.backoff.length - 1];
+    const seconds = Math.floor(delay / 1000);
+    
+    // Show auto-retry progress
+    showAutoRetryProgress(seconds);
+    
+    // Start countdown
+    let remaining = seconds;
+    const countdownEl = document.getElementById('autoRetryCountdown');
+    
+    retryState.countdownTimer = setInterval(() => {
+        remaining--;
+        if (countdownEl) countdownEl.textContent = remaining;
+        updateAutoRetryBar(remaining, seconds);
+        
+        if (remaining <= 0) {
+            clearAutoRetryTimers();
+            hideAutoRetryProgress();
+            handleRetryTask();
+        }
+    }, 1000);
+    
+    // Store timer reference
+    retryState.autoRetryTimer = setTimeout(() => {
+        // Backup trigger if interval somehow fails
+        clearAutoRetryTimers();
+        handleRetryTask();
+    }, delay + 500);
+}
+
+/**
+ * Starts credit countdown timer
+ */
+function startCreditCountdown() {
+    const timerEl = document.getElementById('creditCountdownTimer');
+    const modalTimerEl = document.getElementById('creditModalCountdown');
+    
+    if (!retryState.suggestedRetryTime) return;
+    
+    const updateCountdown = () => {
+        const remaining = retryState.suggestedRetryTime - Date.now();
+        
+        if (remaining <= 0) {
+            if (timerEl) timerEl.textContent = 'Credits may be available now';
+            if (modalTimerEl) modalTimerEl.textContent = 'Ready to retry!';
+            clearInterval(retryState.countdownTimer);
+            
+            // Show notification
+            notifications.info('Credits may be available now. Click "Check Now" to retry.');
+            return;
+        }
+        
+        const hours = Math.floor(remaining / (60 * 60 * 1000));
+        const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+        const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
+        
+        const timeStr = hours > 0 
+            ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+            : `${minutes}:${String(seconds).padStart(2, '0')}`;
+        
+        if (timerEl) timerEl.textContent = timeStr;
+        if (modalTimerEl) modalTimerEl.textContent = timeStr;
+    };
+    
+    // Initial update
+    updateCountdown();
+    
+    // Start interval
+    retryState.countdownTimer = setInterval(updateCountdown, 1000);
+}
+
+/**
+ * Shows auto-retry progress bar
+ */
+function showAutoRetryProgress(seconds) {
+    const container = document.getElementById('autoRetryProgress');
+    const countdownEl = document.getElementById('autoRetryCountdown');
+    
+    if (container) container.classList.remove('hidden');
+    if (countdownEl) countdownEl.textContent = seconds;
+    
+    updateAutoRetryBar(seconds, seconds);
+}
+
+/**
+ * Hides auto-retry progress bar
+ */
+function hideAutoRetryProgress() {
+    const container = document.getElementById('autoRetryProgress');
+    if (container) container.classList.add('hidden');
+}
+
+/**
+ * Updates auto-retry progress bar
+ */
+function updateAutoRetryBar(remaining, total) {
+    const bar = document.getElementById('autoRetryBarFill');
+    if (bar) {
+        const percent = ((total - remaining) / total) * 100;
+        bar.style.width = `${percent}%`;
+    }
+}
+
+/**
+ * Clears all auto-retry timers
+ */
+function clearAutoRetryTimers() {
+    if (retryState.autoRetryTimer) {
+        clearTimeout(retryState.autoRetryTimer);
+        retryState.autoRetryTimer = null;
+    }
+    if (retryState.countdownTimer) {
+        clearInterval(retryState.countdownTimer);
+        retryState.countdownTimer = null;
+    }
+}
+
+/**
+ * Shows credit error modal
+ */
+function showCreditErrorModal() {
+    const modal = document.getElementById('creditErrorModal');
+    if (modal) {
+        showModal('creditErrorModal');
+        
+        // Start countdown in modal
+        if (retryState.suggestedRetryTime) {
+            startCreditCountdown();
+        }
+    }
+}
+
+// Credit error modal handlers
+document.getElementById('closeCreditErrorModal')?.addEventListener('click', () => {
+    closeModal('creditErrorModal');
+});
+
+document.getElementById('creditModalCancel')?.addEventListener('click', () => {
+    closeModal('creditErrorModal');
+});
+
+document.getElementById('creditModalWaitRetry')?.addEventListener('click', () => {
+    closeModal('creditErrorModal');
+    notifications.info('Auto-retry enabled. You will be notified when the task resumes.');
+});
+
+document.getElementById('creditModalRetryNow')?.addEventListener('click', () => {
+    closeModal('creditErrorModal');
+    handleRetryTask();
+});
+
+// Load retry state on init (after taskId is set)
+document.addEventListener('DOMContentLoaded', () => {
+    // Delay to ensure taskId is parsed from URL
+    setTimeout(() => {
+        if (taskId) {
+            loadRetryState();
+        }
+    }, 100);
+})

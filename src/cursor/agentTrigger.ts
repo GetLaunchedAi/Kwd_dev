@@ -14,6 +14,45 @@ export interface AgentTriggerOptions {
 }
 
 /**
+ * FIX: Helper function to extract step number from task ID or demo status
+ * Returns { stepNumber, stepName } for demo tasks, or null for non-demo tasks
+ */
+async function getStepInfoFromTask(clientFolder: string, taskId: string): Promise<{ stepNumber: number; stepName: string } | null> {
+  if (!taskId.startsWith('demo-')) {
+    return null;
+  }
+  
+  // Parse step number from taskId: "demo-xyz" is step 1, "demo-xyz-step2" is step 2, etc.
+  const stepMatch = taskId.match(/-step(\d+)$/);
+  let stepNumber = 1; // Default to step 1 if no step suffix
+  
+  if (stepMatch) {
+    const parsed = parseInt(stepMatch[1], 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 10) {
+      stepNumber = parsed;
+    }
+  }
+  
+  // Try to get step from demo.status.json for more accuracy
+  try {
+    const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+    if (fse.existsSync(demoStatusPath)) {
+      const status = await fse.readJson(demoStatusPath);
+      if (status.currentStep && typeof status.currentStep === 'number') {
+        stepNumber = status.currentStep;
+      }
+    }
+  } catch (e) {
+    // Use parsed step number as fallback
+  }
+  
+  const stepNames = ['branding', 'copywriting', 'imagery', 'review'];
+  const stepName = stepNames[stepNumber - 1] || 'unknown';
+  
+  return { stepNumber, stepName };
+}
+
+/**
  * FIX: Helper function to update demo status on failure
  * Extracted to avoid code duplication and ensure consistent error handling
  */
@@ -47,6 +86,47 @@ async function updateDemoStatusOnFailure(clientFolder: string, taskId: string, e
     }
   } catch (demoStatusErr: any) {
     logger.warn(`Could not update demo status on failure: ${demoStatusErr.message}`);
+  }
+}
+
+/**
+ * FIX: Marks a step as failed so error recovery can work
+ * This is CRITICAL for the retry/skip functionality to function properly
+ */
+async function markDemoStepAsFailed(
+  clientFolder: string, 
+  taskId: string, 
+  errorCategory: string, 
+  errorMessage: string
+): Promise<void> {
+  const stepInfo = await getStepInfoFromTask(clientFolder, taskId);
+  if (!stepInfo) {
+    return; // Not a demo task
+  }
+  
+  try {
+    // Get the parent taskId (for step 2+, we need the base demo ID)
+    const baseTaskId = taskId.replace(/-step\d+$/, '');
+    
+    const { markStepFailed, loadTaskState } = await import('../state/stateManager');
+    
+    // Get last checkpoint hash if available
+    const state = await loadTaskState(clientFolder, baseTaskId);
+    const lastCheckpointHash = state?.lastCheckpoint?.gitCommitHash;
+    
+    await markStepFailed(
+      clientFolder,
+      baseTaskId, // Always use base task ID for state
+      stepInfo.stepNumber,
+      stepInfo.stepName,
+      errorCategory,
+      errorMessage,
+      lastCheckpointHash
+    );
+    
+    logger.info(`Marked step ${stepInfo.stepNumber} (${stepInfo.stepName}) as failed for ${baseTaskId}: ${errorCategory}`);
+  } catch (err: any) {
+    logger.error(`Failed to mark step as failed for ${taskId}: ${err.message}`);
   }
 }
 
@@ -111,12 +191,45 @@ export async function triggerAgent(
         } else {
           logger.error(`Task ${task.id} failed via autonomous runner with code ${result.exitCode}.`);
           const { updateWorkflowState, WorkflowState } = await import('../state/stateManager');
-          await updateWorkflowState(clientFolder, task.id, WorkflowState.ERROR, {
-            error: result.error || `Process exited with code ${result.exitCode}`
-          });
+          
+          // Build detailed error info for the state
+          const errorInfo: Record<string, any> = {
+            error: result.error || `Process exited with code ${result.exitCode}`,
+            exitCode: result.exitCode
+          };
+          
+          // Determine error category for recovery
+          let errorCategory = result.errorCategory || 'unknown';
+          let userMessage = result.error || `Agent exited with code ${result.exitCode}`;
+          
+          // Add categorized error info for frontend handling
+          if (result.creditError) {
+            errorInfo.creditError = true;
+            errorInfo.errorCategory = 'credit_limit';
+            errorCategory = 'credit_limit';
+            userMessage = 'AI credits have been exhausted. Please wait for credits to reset or upgrade your Cursor plan.';
+            errorInfo.userMessage = userMessage;
+            logger.error(`[CREDIT EXHAUSTED] Task ${task.id} failed due to credit limit`);
+          } else if (result.modelError) {
+            errorInfo.modelError = true;
+            errorInfo.failedModel = result.failedModel;
+            errorInfo.errorCategory = 'model_error';
+            errorCategory = 'model_error';
+            userMessage = `The AI model "${result.failedModel || 'selected'}" is unavailable. Try a different model.`;
+            errorInfo.userMessage = userMessage;
+          } else if (result.errorCategory) {
+            errorInfo.errorCategory = result.errorCategory;
+            errorCategory = result.errorCategory;
+          }
+          
+          await updateWorkflowState(clientFolder, task.id, WorkflowState.ERROR, errorInfo);
+          
+          // FIX: Mark the step as failed so error recovery (retry/skip) can work
+          // This populates the failedStep field that continueAfterError depends on
+          await markDemoStepAsFailed(clientFolder, task.id, errorCategory, userMessage);
           
           // Update demo status if this is a demo task so frontend UI reflects the failure
-          await updateDemoStatusOnFailure(clientFolder, task.id, result.error || `Agent exited with code ${result.exitCode}`);
+          await updateDemoStatusOnFailure(clientFolder, task.id, userMessage);
         }
       } catch (err: any) {
         logger.error(`Error running cursor-agent via autonomous runner: ${err.message}`);
@@ -124,12 +237,17 @@ export async function triggerAgent(
         // Critical: Update workflow state to ERROR so the task doesn't get stuck
         try {
           const { updateWorkflowState, WorkflowState } = await import('../state/stateManager');
+          const errorMessage = `Agent runner error: ${err.message}`;
+          
           await updateWorkflowState(clientFolder, task.id, WorkflowState.ERROR, {
-            error: `Agent runner error: ${err.message}`
+            error: errorMessage
           });
           
+          // FIX: Mark the step as failed for error recovery to work
+          await markDemoStepAsFailed(clientFolder, task.id, 'unknown', errorMessage);
+          
           // Update demo status if this is a demo task
-          await updateDemoStatusOnFailure(clientFolder, task.id, `Agent error: ${err.message}`);
+          await updateDemoStatusOnFailure(clientFolder, task.id, errorMessage);
         } catch (stateErr: any) {
           logger.error(`Failed to update state after agent error: ${stateErr.message}`);
         }

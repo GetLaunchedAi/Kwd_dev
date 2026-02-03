@@ -204,6 +204,9 @@ function renderDemoDetails() {
     // Publishing section (show GitHub/Netlify status)
     renderPublishingSection(status);
     
+    // Error section (show if demo step failed)
+    renderDemoErrorSection(status);
+    
     // Update feedback section based on current state
     updateFeedbackSectionState();
     
@@ -1352,3 +1355,779 @@ function updateFeedbackSectionState() {
         }
     }
 }
+
+// ============================================
+// Demo Error Recovery System
+// ============================================
+
+/**
+ * Error category definitions for demo workflow
+ */
+const DEMO_ERROR_CATEGORIES = {
+    credit_limit: {
+        label: 'Credits Exhausted',
+        icon: 'credit-card',
+        className: 'credit',
+        recoverable: true,
+        autoRetry: false,
+        canSkipStep: false
+    },
+    model_error: {
+        label: 'Model Unavailable',
+        icon: 'cpu',
+        className: 'model',
+        recoverable: true,
+        autoRetry: false,
+        canSkipStep: false
+    },
+    network_error: {
+        label: 'Network Error',
+        icon: 'wifi-off',
+        className: 'network',
+        recoverable: true,
+        autoRetry: true,
+        canSkipStep: false,
+        backoff: [5000, 10000, 30000]
+    },
+    timeout: {
+        label: 'Request Timeout',
+        icon: 'clock',
+        className: 'timeout',
+        recoverable: true,
+        autoRetry: true,
+        canSkipStep: true,
+        backoff: [5000, 15000]
+    },
+    step_failed: {
+        label: 'Step Failed',
+        icon: 'alert-triangle',
+        className: 'unknown',
+        recoverable: true,
+        autoRetry: false,
+        canSkipStep: true
+    },
+    unknown: {
+        label: 'Unexpected Error',
+        icon: 'alert-triangle',
+        className: 'unknown',
+        recoverable: true,
+        autoRetry: false,
+        canSkipStep: true
+    }
+};
+
+// Demo retry state
+let demoRetryState = {
+    slug: null,
+    errorCategory: null,
+    failedStep: null,
+    retryCount: 0,
+    lastErrorTime: null,
+    autoRetryTimer: null,
+    countdownTimer: null
+};
+
+/**
+ * Loads demo retry state from localStorage
+ */
+function loadDemoRetryState() {
+    try {
+        const stored = localStorage.getItem(`demoRetryState_${clientSlug}`);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed.slug === clientSlug && 
+                parsed.lastErrorTime && 
+                Date.now() - parsed.lastErrorTime < 24 * 60 * 60 * 1000) {
+                demoRetryState = { ...demoRetryState, ...parsed };
+            }
+        }
+    } catch (err) {
+        console.warn('Failed to load demo retry state:', err);
+    }
+}
+
+/**
+ * Saves demo retry state to localStorage
+ */
+function saveDemoRetryState() {
+    try {
+        localStorage.setItem(`demoRetryState_${clientSlug}`, JSON.stringify({
+            slug: demoRetryState.slug,
+            errorCategory: demoRetryState.errorCategory,
+            failedStep: demoRetryState.failedStep,
+            retryCount: demoRetryState.retryCount,
+            lastErrorTime: demoRetryState.lastErrorTime
+        }));
+    } catch (err) {
+        console.warn('Failed to save demo retry state:', err);
+    }
+}
+
+/**
+ * Clears demo retry state
+ */
+function clearDemoRetryState() {
+    demoRetryState = {
+        slug: null,
+        errorCategory: null,
+        failedStep: null,
+        retryCount: 0,
+        lastErrorTime: null,
+        autoRetryTimer: null,
+        countdownTimer: null
+    };
+    try {
+        localStorage.removeItem(`demoRetryState_${clientSlug}`);
+    } catch (err) {
+        console.warn('Failed to clear demo retry state:', err);
+    }
+}
+
+/**
+ * Detects error category from demo status
+ */
+function detectDemoErrorCategory(status) {
+    if (!status) return 'unknown';
+    
+    // Check explicit error category
+    if (status.errorCategory) {
+        return status.errorCategory;
+    }
+    
+    // Infer from error message
+    const errorMsg = (status.error || status.message || '').toLowerCase();
+    
+    if (errorMsg.includes('credit') || errorMsg.includes('usage limit') || errorMsg.includes('quota')) {
+        return 'credit_limit';
+    }
+    if (errorMsg.includes('model') || errorMsg.includes('unavailable')) {
+        return 'model_error';
+    }
+    if (errorMsg.includes('network') || errorMsg.includes('connection')) {
+        return 'network_error';
+    }
+    if (errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
+        return 'timeout';
+    }
+    if (errorMsg.includes('step') && errorMsg.includes('failed')) {
+        return 'step_failed';
+    }
+    
+    return 'unknown';
+}
+
+/**
+ * Renders the demo error section with enhanced recovery options
+ */
+async function renderDemoErrorSection(status) {
+    const errorSection = document.getElementById('demoErrorSection');
+    const errorBadge = document.getElementById('demoErrorCategoryBadge');
+    const errorUserMessage = document.getElementById('demoErrorUserMessage');
+    const errorDetails = document.getElementById('demoErrorDetails');
+    const errorActions = document.getElementById('demoErrorActions');
+    
+    const state = status?.state || 'unknown';
+    const isError = state === 'failed' || state === 'error';
+    
+    if (!errorSection || !isError) {
+        if (errorSection) errorSection.classList.add('hidden');
+        clearDemoAutoRetryTimers();
+        return;
+    }
+    
+    // Detect error category
+    const category = detectDemoErrorCategory(status);
+    const categoryInfo = DEMO_ERROR_CATEGORIES[category] || DEMO_ERROR_CATEGORIES.unknown;
+    
+    // Update retry state
+    if (demoRetryState.errorCategory !== category || demoRetryState.slug !== clientSlug) {
+        demoRetryState.slug = clientSlug;
+        demoRetryState.errorCategory = category;
+        demoRetryState.failedStep = status.currentStep || 1;
+        demoRetryState.lastErrorTime = Date.now();
+        saveDemoRetryState();
+    }
+    
+    // Show error section
+    errorSection.classList.remove('hidden');
+    
+    // Update badge
+    if (errorBadge) {
+        errorBadge.innerHTML = `<i data-lucide="${categoryInfo.icon}"></i> ${categoryInfo.label}`;
+        errorBadge.className = `error-category-badge ${categoryInfo.className}`;
+    }
+    
+    // User message
+    const userMessage = status.userMessage || getDemoErrorMessage(category, status.currentStep);
+    if (errorUserMessage) {
+        errorUserMessage.textContent = userMessage;
+    }
+    
+    // Error details
+    if (errorDetails) {
+        errorDetails.textContent = status.error || status.message || 'No additional details available.';
+    }
+    
+    // **NEW**: Fetch recovery options from backend for enhanced UI
+    try {
+        const recoveryData = await api.get(`/demos/${clientSlug}/recovery-options`);
+        
+        if (recoveryData.success) {
+            renderRecoveryOptions(recoveryData, status);
+            // Refresh icons after rendering
+            if (window.lucide) lucide.createIcons();
+            return; // Skip default action rendering
+        }
+    } catch (err) {
+        console.warn(`Could not fetch recovery options: ${err.message}`);
+        // Fallback to basic retry buttons (existing behavior)
+    }
+    
+    // Fallback: Show basic action buttons
+    if (errorActions) {
+        errorActions.classList.remove('hidden');
+        
+        // Show/hide skip button based on category
+        const skipBtn = document.getElementById('demoSkipStepBtn');
+        if (skipBtn) {
+            if (categoryInfo.canSkipStep && status.currentStep < (status.totalSteps || 4)) {
+                skipBtn.classList.remove('hidden');
+            } else {
+                skipBtn.classList.add('hidden');
+            }
+        }
+    }
+    
+    // Setup error action handlers
+    setupDemoErrorActionHandlers(category, status);
+    
+    // Start auto-retry for transient errors
+    if (categoryInfo.autoRetry && demoRetryState.retryCount < 3) {
+        startDemoAutoRetry(category);
+    }
+    
+    // Refresh icons
+    if (window.lucide) lucide.createIcons();
+}
+
+/**
+ * Renders enhanced recovery options with rollback preview
+ */
+function renderRecoveryOptions(recoveryData, status) {
+    const { failedStep, checkpoint, preview, options, retryCount, maxRetries, canRetry, canSkip } = recoveryData;
+    
+    // Get or create the recovery context container
+    let recoveryContainer = document.getElementById('recoveryContextContainer');
+    const errorActions = document.getElementById('demoErrorActions');
+    
+    if (!recoveryContainer && errorActions) {
+        recoveryContainer = document.createElement('div');
+        recoveryContainer.id = 'recoveryContextContainer';
+        recoveryContainer.className = 'recovery-context';
+        errorActions.parentNode.insertBefore(recoveryContainer, errorActions);
+    }
+    
+    if (!recoveryContainer) return;
+    
+    // Build the recovery UI HTML
+    let html = `
+        <h4>Recovery Options</h4>
+    `;
+    
+    // Checkpoint info
+    if (checkpoint) {
+        html += `
+            <div class="checkpoint-info">
+                <i data-lucide="save"></i>
+                <span>Last checkpoint: Step ${checkpoint.stepNumber} (${checkpoint.stepName})</span>
+                <span class="checkpoint-time">${FormattingUtils.formatRelativeTime(checkpoint.timestamp)}</span>
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="checkpoint-info warning">
+                <i data-lucide="alert-circle"></i>
+                <span>No checkpoint available - step will restart from current state</span>
+            </div>
+        `;
+    }
+    
+    // Retry warning
+    if (retryCount > 0) {
+        html += `
+            <div class="retry-warning">
+                <i data-lucide="alert-triangle"></i>
+                <span>This step has been retried ${retryCount} time${retryCount === 1 ? '' : 's'}</span>
+                ${retryCount >= maxRetries ? '<span class="retry-limit-reached">(limit reached)</span>' : ''}
+            </div>
+        `;
+    }
+    
+    // Rollback preview
+    if (preview && (preview.preservedSteps.length > 0 || preview.discardedChanges.length > 0)) {
+        html += `
+            <div class="rollback-preview">
+                <h5>What will happen on retry:</h5>
+        `;
+        
+        if (preview.preservedSteps.length > 0) {
+            html += `
+                <div class="preview-section preserved">
+                    <i data-lucide="check-circle"></i>
+                    <div>
+                        <strong>Preserved:</strong>
+                        <ul>${preview.preservedSteps.map(step => `<li>${FormattingUtils.escapeHtml(step)}</li>`).join('')}</ul>
+                    </div>
+                </div>
+            `;
+        }
+        
+        if (preview.discardedChanges.length > 0) {
+            html += `
+                <div class="preview-section discarded">
+                    <i data-lucide="x-circle"></i>
+                    <div>
+                        <strong>Will be discarded:</strong>
+                        <ul>${preview.discardedChanges.map(change => `<li>${FormattingUtils.escapeHtml(change)}</li>`).join('')}</ul>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += `</div>`;
+    }
+    
+    // Recovery action buttons
+    html += `<div class="recovery-actions">`;
+    
+    for (const option of options) {
+        const variantClass = option.variant === 'primary' ? 'btn-primary' : 
+                            option.variant === 'danger' ? 'btn-danger' : 
+                            option.variant === 'warning' ? 'btn-warning' : 'btn-secondary';
+        
+        html += `
+            <div class="recovery-action-item">
+                <button 
+                    class="btn ${variantClass}" 
+                    onclick="handleRecoveryAction('${option.action}', this)"
+                    ${option.disabled ? 'disabled' : ''}
+                    ${option.disabledReason ? `title="${FormattingUtils.escapeHtml(option.disabledReason)}"` : ''}
+                >
+                    <i data-lucide="${option.icon}"></i>
+                    ${FormattingUtils.escapeHtml(option.label)}
+                </button>
+                <p class="action-description">${FormattingUtils.escapeHtml(option.description)}</p>
+            </div>
+        `;
+    }
+    
+    html += `</div>`;
+    
+    recoveryContainer.innerHTML = html;
+    
+    // Hide the default error actions since we have custom recovery UI
+    const defaultActions = document.getElementById('demoErrorActions');
+    if (defaultActions) {
+        defaultActions.classList.add('hidden');
+    }
+}
+
+/**
+ * Handles recovery action from the enhanced UI
+ * @param {string} action - The recovery action ('retry', 'skip', 'wait', 'abort')
+ * @param {HTMLButtonElement} [buttonElement] - Optional button element that triggered the action
+ */
+// FIX: Add global flag to prevent double-clicks during recovery operations
+// Reset on page load to handle navigation edge cases
+let recoveryInProgress = false;
+let recoveryActionTimestamp = 0; // Track when last recovery action started
+
+// FIX: Reset recovery flag when page loads/unloads to prevent stuck state after navigation
+window.addEventListener('load', () => { 
+    recoveryInProgress = false;
+    recoveryActionTimestamp = 0;
+});
+window.addEventListener('beforeunload', () => { 
+    recoveryInProgress = false;
+    recoveryActionTimestamp = 0;
+});
+
+// FIX: Also reset if flag has been stuck for too long (safety timeout)
+function checkRecoveryTimeout() {
+    if (recoveryInProgress && recoveryActionTimestamp > 0) {
+        const elapsed = Date.now() - recoveryActionTimestamp;
+        if (elapsed > 60000) { // 1 minute timeout
+            console.warn('Recovery action timed out, resetting flag');
+            recoveryInProgress = false;
+            recoveryActionTimestamp = 0;
+        }
+    }
+}
+
+async function handleRecoveryAction(action, buttonElement) {
+    // FIX: Check for stuck flag and reset if needed
+    checkRecoveryTimeout();
+    
+    // FIX: Prevent double-clicks with global flag (checked before any async operations)
+    if (recoveryInProgress) {
+        console.log('Recovery already in progress, ignoring duplicate click');
+        notifications.warning('Please wait, recovery action is in progress...');
+        return;
+    }
+    
+    // Handle 'wait' and 'abort' actions differently
+    if (action === 'wait') {
+        notifications.info('Please wait for credits to reset. You can check back later.');
+        return;
+    }
+    
+    if (action === 'abort') {
+        if (!confirm('Are you sure you want to cancel this demo? You can restart it later from the dashboard.')) {
+            return;
+        }
+        // Redirect to dashboard
+        window.location.href = '/index.html';
+        return;
+    }
+    
+    // Set flag immediately before any async work
+    recoveryInProgress = true;
+    recoveryActionTimestamp = Date.now();
+    
+    // For retry and skip, call the backend
+    // FIX: Use passed button element directly instead of deprecated global event
+    const btn = buttonElement || null;
+    let originalContent = '';
+    if (btn) {
+        btn.disabled = true;
+        originalContent = btn.innerHTML;
+        btn.innerHTML = `<i data-lucide="loader" class="animate-spin"></i> ${action === 'retry' ? 'Retrying...' : 'Skipping...'}`;
+        if (window.lucide) lucide.createIcons();
+    }
+    
+    try {
+        const response = await api.post(`/demos/${clientSlug}/retry-step`, { action });
+        
+        if (response.success) {
+            notifications.success(response.message);
+            
+            // Clear retry state
+            clearDemoRetryState();
+            
+            // Hide error section
+            document.getElementById('demoErrorSection')?.classList.add('hidden');
+            
+            // Remove recovery context
+            document.getElementById('recoveryContextContainer')?.remove();
+            
+            // Reload details and start polling
+            await loadDemoDetails({ showNotification: false });
+            startAutoRefresh();
+        } else {
+            throw new Error(response.error || 'Recovery failed');
+        }
+    } catch (err) {
+        notifications.error(`Recovery failed: ${err.message}`);
+        // Re-render error section
+        renderDemoErrorSection(demoData?.status);
+    } finally {
+        // FIX: Always reset flag to allow future recovery attempts
+        recoveryInProgress = false;
+        recoveryActionTimestamp = 0;
+        
+        // FIX: Always restore button state in finally (not just on error)
+        // This handles edge cases where success path doesn't re-render the button
+        if (btn && originalContent) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+}
+
+/**
+ * Gets user-friendly error message for demo errors
+ */
+function getDemoErrorMessage(category, step) {
+    const stepNames = ['Branding', 'Copywriting', 'Imagery', 'Review'];
+    const stepName = stepNames[(step || 1) - 1] || 'current step';
+    
+    const messages = {
+        credit_limit: `Credits exhausted during ${stepName}. Please wait for credits to reset or upgrade your plan.`,
+        model_error: `The AI model is unavailable. The ${stepName} step cannot continue until the model is available.`,
+        network_error: `A network error occurred during ${stepName}. We'll retry automatically.`,
+        timeout: `The ${stepName} step timed out. This can happen with complex customizations.`,
+        step_failed: `The ${stepName} step failed. You can retry or skip to the next step.`,
+        unknown: `An unexpected error occurred during ${stepName}.`
+    };
+    
+    return messages[category] || messages.unknown;
+}
+
+/**
+ * Sets up demo error action handlers
+ */
+function setupDemoErrorActionHandlers(category, status) {
+    // Main retry button
+    const mainRetryBtn = document.getElementById('demoErrorRetryBtn');
+    if (mainRetryBtn) {
+        mainRetryBtn.onclick = () => handleRetryDemoStep();
+    }
+    
+    // Retry step button
+    const retryStepBtn = document.getElementById('demoRetryStepBtn');
+    if (retryStepBtn) {
+        retryStepBtn.onclick = () => handleRetryDemoStep();
+    }
+    
+    // Skip step button
+    const skipStepBtn = document.getElementById('demoSkipStepBtn');
+    if (skipStepBtn) {
+        skipStepBtn.onclick = () => handleSkipDemoStep(status);
+    }
+    
+    // Restart demo button
+    const restartBtn = document.getElementById('demoRestartBtn');
+    if (restartBtn) {
+        restartBtn.onclick = () => handleRestartDemo();
+    }
+    
+    // Cancel auto-retry
+    const cancelBtn = document.getElementById('demoCancelAutoRetryBtn');
+    if (cancelBtn) {
+        cancelBtn.onclick = () => {
+            clearDemoAutoRetryTimers();
+            hideDemoAutoRetryProgress();
+        };
+    }
+}
+
+/**
+ * Handles retrying the current demo step
+ */
+async function handleRetryDemoStep() {
+    demoRetryState.retryCount++;
+    saveDemoRetryState();
+    
+    clearDemoAutoRetryTimers();
+    
+    const btn = document.getElementById('demoRetryStepBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Retrying...';
+        if (window.lucide) lucide.createIcons();
+    }
+    
+    try {
+        const taskId = `demo-${clientSlug}`;
+        const currentStep = demoData?.status?.currentStep || 1;
+        
+        // Use request-changes endpoint to trigger a retry
+        const response = await api.post(`/demos/${clientSlug}/request-changes`, {
+            feedback: `Retry step ${currentStep} after error`
+        });
+        
+        if (response.success) {
+            notifications.success('Retrying step...');
+            clearDemoRetryState();
+            
+            // Hide error section
+            document.getElementById('demoErrorSection')?.classList.add('hidden');
+            
+            // Reload details and start polling
+            await loadDemoDetails({ showNotification: false });
+            startAutoRefresh();
+        } else {
+            throw new Error(response.error || 'Failed to retry step');
+        }
+    } catch (err) {
+        notifications.error(`Failed to retry: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="refresh-cw"></i> Retry Current Step';
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+}
+
+/**
+ * Handles skipping to the next demo step
+ */
+async function handleSkipDemoStep(status) {
+    const currentStep = status?.currentStep || 1;
+    const totalSteps = status?.totalSteps || 4;
+    
+    if (currentStep >= totalSteps) {
+        notifications.warning('Already on the final step.');
+        return;
+    }
+    
+    if (!confirm(`Skip Step ${currentStep} and continue to Step ${currentStep + 1}? The skipped step may be incomplete.`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('demoSkipStepBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Skipping...';
+        if (window.lucide) lucide.createIcons();
+    }
+    
+    try {
+        const taskId = `demo-${clientSlug}`;
+        
+        // Approve current step to move to next (even though it failed)
+        const result = await api.post(`/tasks/${taskId}/approve`, { skipFailed: true });
+        
+        if (result.nextStep || result.completed) {
+            notifications.success(`Skipped to step ${currentStep + 1}`);
+            clearDemoRetryState();
+            
+            // Hide error section
+            document.getElementById('demoErrorSection')?.classList.add('hidden');
+            
+            await loadDemoDetails({ showNotification: false });
+        } else {
+            throw new Error(result.error || 'Failed to skip step');
+        }
+    } catch (err) {
+        notifications.error(`Failed to skip step: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="skip-forward"></i> Skip to Next Step';
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+}
+
+/**
+ * Handles restarting the entire demo
+ */
+async function handleRestartDemo() {
+    if (!confirm('Restart the entire demo from Step 1? All progress will be lost.')) {
+        return;
+    }
+    
+    const btn = document.getElementById('demoRestartBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Restarting...';
+        if (window.lucide) lucide.createIcons();
+    }
+    
+    try {
+        const response = await api.post(`/demos/${clientSlug}/restart`, {});
+        
+        if (response.success) {
+            notifications.success('Demo restarted from Step 1');
+            clearDemoRetryState();
+            
+            // Hide error section
+            document.getElementById('demoErrorSection')?.classList.add('hidden');
+            
+            await loadDemoDetails({ showNotification: false });
+            startAutoRefresh();
+        } else {
+            throw new Error(response.error || 'Failed to restart demo');
+        }
+    } catch (err) {
+        notifications.error(`Failed to restart: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="rotate-ccw"></i> Restart Demo';
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+}
+
+/**
+ * Starts auto-retry for transient demo errors
+ */
+function startDemoAutoRetry(category) {
+    const categoryInfo = DEMO_ERROR_CATEGORIES[category];
+    if (!categoryInfo?.autoRetry || !categoryInfo.backoff) return;
+    if (demoRetryState.retryCount >= 3) return;
+    
+    const delay = categoryInfo.backoff[demoRetryState.retryCount] || categoryInfo.backoff[categoryInfo.backoff.length - 1];
+    const seconds = Math.floor(delay / 1000);
+    
+    showDemoAutoRetryProgress(seconds);
+    
+    let remaining = seconds;
+    const countdownEl = document.getElementById('demoAutoRetryCountdown');
+    
+    demoRetryState.countdownTimer = setInterval(() => {
+        remaining--;
+        if (countdownEl) countdownEl.textContent = remaining;
+        updateDemoAutoRetryBar(remaining, seconds);
+        
+        if (remaining <= 0) {
+            clearDemoAutoRetryTimers();
+            hideDemoAutoRetryProgress();
+            handleRetryDemoStep();
+        }
+    }, 1000);
+    
+    demoRetryState.autoRetryTimer = setTimeout(() => {
+        clearDemoAutoRetryTimers();
+        handleRetryDemoStep();
+    }, delay + 500);
+}
+
+/**
+ * Shows demo auto-retry progress
+ */
+function showDemoAutoRetryProgress(seconds) {
+    const container = document.getElementById('demoAutoRetryProgress');
+    const countdownEl = document.getElementById('demoAutoRetryCountdown');
+    
+    if (container) container.classList.remove('hidden');
+    if (countdownEl) countdownEl.textContent = seconds;
+    
+    updateDemoAutoRetryBar(seconds, seconds);
+}
+
+/**
+ * Hides demo auto-retry progress
+ */
+function hideDemoAutoRetryProgress() {
+    const container = document.getElementById('demoAutoRetryProgress');
+    if (container) container.classList.add('hidden');
+}
+
+/**
+ * Updates demo auto-retry bar
+ */
+function updateDemoAutoRetryBar(remaining, total) {
+    const bar = document.getElementById('demoAutoRetryBarFill');
+    if (bar) {
+        const percent = ((total - remaining) / total) * 100;
+        bar.style.width = `${percent}%`;
+    }
+}
+
+/**
+ * Clears demo auto-retry timers
+ */
+function clearDemoAutoRetryTimers() {
+    if (demoRetryState.autoRetryTimer) {
+        clearTimeout(demoRetryState.autoRetryTimer);
+        demoRetryState.autoRetryTimer = null;
+    }
+    if (demoRetryState.countdownTimer) {
+        clearInterval(demoRetryState.countdownTimer);
+        demoRetryState.countdownTimer = null;
+    }
+}
+
+// Load retry state on init
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        if (clientSlug) {
+            loadDemoRetryState();
+        }
+    }, 100);
+});

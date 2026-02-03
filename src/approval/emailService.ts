@@ -163,7 +163,13 @@ ${testResult.output.substring(0, 1000)}
     const toEmail = toEmailOverride || process.env.APPROVAL_EMAIL_TO;
     
     if (!toEmail) {
-      logger.warn(`No email recipient configured for failure notification (task ${taskId}). Set APPROVAL_EMAIL_TO in environment.`);
+      // ISSUE 6 FIX: Provide clearer warning for local tasks without notification email
+      const isLocalTask = taskId.startsWith('local-');
+      if (isLocalTask) {
+        logger.warn(`No notification email configured for local task ${taskId}. Test failures will not be emailed. To receive notifications, either: 1) Provide a notificationEmail when creating the task via API, or 2) Set APPROVAL_EMAIL_TO in environment.`);
+      } else {
+        logger.warn(`No email recipient configured for failure notification (task ${taskId}). The task has no assignee email. Set APPROVAL_EMAIL_TO in environment as a fallback.`);
+      }
       return;
     }
 
@@ -339,7 +345,13 @@ This approval request will expire on ${request.expiresAt.toLocaleString()}
     const toEmail = request.assigneeEmail || process.env.APPROVAL_EMAIL_TO;
     
     if (!toEmail) {
-      logger.warn(`No email recipient configured for approval request (task ${request.taskId}). Set APPROVAL_EMAIL_TO in environment.`);
+      // ISSUE 6 FIX: Provide clearer warning for local tasks without notification email
+      const isLocalTask = request.taskId.startsWith('local-');
+      if (isLocalTask) {
+        logger.warn(`No notification email configured for local task ${request.taskId}. Approval emails will not be sent. To receive notifications, either: 1) Provide a notificationEmail when creating the task via API, or 2) Set APPROVAL_EMAIL_TO in environment.`);
+      } else {
+        logger.warn(`No email recipient configured for approval request (task ${request.taskId}). The task has no assignee email. Set APPROVAL_EMAIL_TO in environment as a fallback.`);
+      }
       return;
     }
 

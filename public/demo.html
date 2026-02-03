@@ -22,6 +22,10 @@
                     <i data-lucide="layout-dashboard"></i>
                     <span>Dashboard</span>
                 </a>
+                <a href="/create-task.html" class="nav-item">
+                    <i data-lucide="file-plus"></i>
+                    <span>Create Task</span>
+                </a>
                 <a href="/create-demo.html" class="nav-item">
                     <i data-lucide="plus-square"></i>
                     <span>Create Demo</span>
@@ -441,6 +445,49 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- Demo Error Section -->
+                            <section id="demoErrorSection" class="card error-details-card hidden">
+                                <div class="card-header flex-between">
+                                    <div class="error-header-info">
+                                        <h3><i data-lucide="alert-triangle"></i> Error</h3>
+                                        <span id="demoErrorCategoryBadge" class="error-category-badge"></span>
+                                    </div>
+                                    <button id="demoErrorRetryBtn" class="btn btn-primary btn-sm">
+                                        <i data-lucide="refresh-cw"></i> Retry Step
+                                    </button>
+                                </div>
+                                <div class="error-body">
+                                    <div id="demoErrorUserMessage" class="error-user-message"></div>
+                                    <div id="demoErrorDetails" class="error-content"></div>
+                                    
+                                    <!-- Error recovery actions -->
+                                    <div id="demoErrorActions" class="error-actions-container hidden">
+                                        <div class="error-action-buttons">
+                                            <button id="demoRetryStepBtn" class="btn btn-primary">
+                                                <i data-lucide="refresh-cw"></i> Retry Current Step
+                                            </button>
+                                            <button id="demoSkipStepBtn" class="btn btn-secondary">
+                                                <i data-lucide="skip-forward"></i> Skip to Next Step
+                                            </button>
+                                            <button id="demoRestartBtn" class="btn btn-ghost">
+                                                <i data-lucide="rotate-ccw"></i> Restart Demo
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Auto-retry progress for demo -->
+                                    <div id="demoAutoRetryProgress" class="auto-retry-progress hidden">
+                                        <div class="auto-retry-info">
+                                            <span id="demoAutoRetryText">Auto-retrying in <span id="demoAutoRetryCountdown">5</span>s...</span>
+                                            <button id="demoCancelAutoRetryBtn" class="btn btn-ghost btn-sm">Cancel</button>
+                                        </div>
+                                        <div class="auto-retry-bar">
+                                            <div id="demoAutoRetryBarFill" class="auto-retry-bar-fill"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
 
                             <!-- Agent Feedback Card -->
                             <section id="agentFeedbackSection" class="card feedback-card">

@@ -11,7 +11,8 @@ import { approveRequest, rejectRequest, getApprovalRequest } from './approval/ap
 import { findAllTasks, findTaskById } from './utils/taskScanner';
 import { findAllClients } from './utils/clientScanner';
 import { generateChangeSummary } from './approval/changeSummarizer';
-import { loadTaskState, WorkflowState } from './state/stateManager';
+import { loadTaskState, WorkflowState, TaskInfo } from './state/stateManager';
+import { ClickUpTask } from './clickup/apiClient';
 import { getAuthorizationUrl, exchangeCodeForToken, generateState, getAccessToken, storeOAuthState, verifyOAuthState } from './clickup/oauthService';
 import { importTask, previewTaskImport } from './handlers/taskImportHandler';
 import { createDemo, getDemoStatus, isSlugAvailable, demoStatusManager, DemoStatus } from './handlers/demoHandler';
@@ -881,8 +882,39 @@ app.post('/api/demo/create', upload.fields([
     
     // Start demo creation logic in the background
     // This includes cloning, dependency installation, and triggering the agent
-    createDemo({ ...req.body, clientSlug: finalSlug }, (req as any).files).catch((error: any) => {
+    createDemo({ ...req.body, clientSlug: finalSlug }, (req as any).files).catch(async (error: any) => {
       logger.error(`Background demo creation failed for ${finalSlug}: ${error.message}`);
+      
+      // FIX: Clean up slug reservation if createDemo fails before writing its own cleanup
+      // This handles errors that occur before the try block in createDemo (e.g., validation errors)
+      try {
+        const { demoStatusManager } = await import('./handlers/demoHandler');
+        const demoDir = path.join(process.cwd(), 'client-websites', finalSlug);
+        const dirExists = await fs.pathExists(demoDir);
+        
+        // Only clean up if the directory was never created (pre-clone failure)
+        if (!dirExists) {
+          logger.info(`Cleaning up slug reservation for ${finalSlug} after early failure`);
+          demoStatusManager.clearCache(finalSlug);
+          
+          // Also update status to 'failed' for polling clients
+          const activeDemosPath = path.join(process.cwd(), 'logs', 'active-demos.json');
+          if (await fs.pathExists(activeDemosPath)) {
+            const activeDemos = await fs.readJson(activeDemosPath);
+            if (activeDemos[finalSlug]) {
+              activeDemos[finalSlug] = {
+                ...activeDemos[finalSlug],
+                state: 'failed',
+                message: error.message,
+                updatedAt: new Date().toISOString()
+              };
+              await fs.writeJson(activeDemosPath, activeDemos, { spaces: 2 });
+            }
+          }
+        }
+      } catch (cleanupErr: any) {
+        logger.warn(`Failed to cleanup after demo creation error: ${cleanupErr.message}`);
+      }
     });
     
     // Return immediately with the slug so the frontend can start polling
@@ -1654,6 +1686,152 @@ app.post('/api/demos/:clientSlug/retry-netlify', async (req: Request, res: Respo
   }
 });
 
+// ============================================
+// Demo Error Recovery Endpoints
+// ============================================
+
+/**
+ * POST /api/demos/:clientSlug/retry-step
+ * Retries a failed demo step with rollback
+ */
+app.post('/api/demos/:clientSlug/retry-step', async (req: Request, res: Response) => {
+  try {
+    const { clientSlug } = req.params;
+    const { action } = req.body; // 'retry' | 'skip'
+
+    if (!action || !['retry', 'skip'].includes(action)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid action. Must be "retry" or "skip"' 
+      });
+    }
+
+    const clientFolder = path.join(process.cwd(), 'client-websites', clientSlug);
+    const taskId = `demo-${clientSlug}`;
+
+    // Validate demo folder exists
+    if (!(await fs.pathExists(clientFolder))) {
+      return res.status(404).json({
+        success: false,
+        error: 'Demo not found'
+      });
+    }
+
+    // Import continueAfterError
+    const { continueAfterError } = await import('./workflow/workflowOrchestrator');
+
+    // FIX: Skip pre-validation check since continueAfterError already validates state
+    // This avoids TOCTOU race condition where state changes between our check and the actual operation
+    // The continueAfterError function has proper locking and will return appropriate error if not in failed state
+
+    logger.info(`Retry step requested for demo ${clientSlug}: action=${action}`);
+
+    // Execute recovery (validates state internally with proper locking)
+    const result = await continueAfterError(clientFolder, taskId, action);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: result.message,
+        nextStep: result.nextStep
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error || result.message
+      });
+    }
+
+  } catch (error: any) {
+    logger.error(`Error retrying demo step for ${req.params.clientSlug}: ${error.message}`);
+    const { toUserFriendlyError } = await import('./utils/userErrors');
+    res.status(500).json({
+      success: false,
+      error: toUserFriendlyError(error, 'demo-retry')
+    });
+  }
+});
+
+/**
+ * GET /api/demos/:clientSlug/recovery-options
+ * Gets available recovery options for a failed demo
+ */
+app.get('/api/demos/:clientSlug/recovery-options', async (req: Request, res: Response) => {
+  try {
+    const { clientSlug } = req.params;
+    const clientFolder = path.join(process.cwd(), 'client-websites', clientSlug);
+    const taskId = `demo-${clientSlug}`;
+
+    // Validate demo folder exists
+    if (!(await fs.pathExists(clientFolder))) {
+      return res.status(404).json({
+        success: false,
+        error: 'Demo not found'
+      });
+    }
+
+    // Import checkpoint and recovery services
+    const { getRecoveryOptionsResponse } = await import('./state/checkpointService');
+    const { getRollbackPreview } = await import('./workflow/workflowOrchestrator');
+    const { loadTaskState } = await import('./state/stateManager');
+
+    const state = await loadTaskState(clientFolder, taskId);
+    if (!state?.failedStep) {
+      return res.status(404).json({
+        success: false,
+        error: 'No failed step found'
+      });
+    }
+
+    // Get total steps from demo status
+    let totalSteps = 4;
+    const demoStatusPath = path.join(clientFolder, 'demo.status.json');
+    if (await fs.pathExists(demoStatusPath)) {
+      const status = await fs.readJson(demoStatusPath);
+      totalSteps = status.totalSteps || 4;
+    }
+
+    // Get recovery options
+    const recoveryOptions = await getRecoveryOptionsResponse(clientFolder, taskId, totalSteps);
+    
+    if (!recoveryOptions) {
+      return res.status(404).json({
+        success: false,
+        error: 'No recovery options available'
+      });
+    }
+
+    // Get rollback preview
+    const previewResult = await getRollbackPreview(clientFolder, taskId);
+
+    res.json({
+      success: true,
+      failedStep: recoveryOptions.failedStep,
+      checkpoint: recoveryOptions.checkpoint ? {
+        stepNumber: recoveryOptions.checkpoint.stepNumber,
+        stepName: recoveryOptions.checkpoint.stepName,
+        timestamp: recoveryOptions.checkpoint.timestamp,
+        gitCommitHash: recoveryOptions.checkpoint.gitCommitHash.substring(0, 7)
+      } : null,
+      preview: previewResult.preview,
+      options: recoveryOptions.options,
+      retryCount: recoveryOptions.retryCount,
+      maxRetries: recoveryOptions.maxRetries,
+      canRetry: recoveryOptions.canRetry,
+      canSkip: recoveryOptions.canSkip,
+      estimatedCreditResetTime: recoveryOptions.estimatedCreditResetTime
+    });
+
+  } catch (error: any) {
+    logger.error(`Error getting recovery options for ${req.params.clientSlug}: ${error.message}`);
+    const { toUserFriendlyError } = await import('./utils/userErrors');
+    res.status(500).json({
+      success: false,
+      error: toUserFriendlyError(error, 'demo-recovery-options')
+    });
+  }
+});
+
 // Test Netlify API connection
 app.get('/api/netlify/test', async (req: Request, res: Response) => {
   try {
@@ -1826,6 +2004,205 @@ app.post('/workflow/continue/:taskId', async (req: Request, res: Response) => {
     res.json({ message: `Workflow continued for task ${taskId}` });
   } catch (error: any) {
     logger.error(`Error continuing workflow: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create local task endpoint - creates a task without ClickUp
+app.post('/api/tasks/create', async (req: Request, res: Response) => {
+  try {
+    const { title, description, clientName, model, notificationEmail } = req.body;
+    
+    // Validate required fields
+    if (!title || typeof title !== 'string' || title.trim().length === 0) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    
+    if (!description || typeof description !== 'string' || description.trim().length === 0) {
+      return res.status(400).json({ error: 'description is required' });
+    }
+    
+    if (!clientName || typeof clientName !== 'string' || clientName.trim().length === 0) {
+      return res.status(400).json({ error: 'clientName is required' });
+    }
+    
+    // Validate title and description lengths
+    const trimmedTitle = title.trim();
+    const trimmedDescription = description.trim();
+    
+    if (trimmedTitle.length > 200) {
+      return res.status(400).json({ error: 'title must be 200 characters or less' });
+    }
+    
+    if (trimmedDescription.length > 5000) {
+      return res.status(400).json({ error: 'description must be 5000 characters or less' });
+    }
+    
+    // Validate client name format (prevent path traversal)
+    const clientNamePattern = /^[a-z0-9-]+$/i;
+    const normalizedClientName = clientName.trim().toLowerCase();
+    
+    if (!clientNamePattern.test(normalizedClientName)) {
+      return res.status(400).json({ 
+        error: 'Invalid client name. Use only letters, numbers, and hyphens.' 
+      });
+    }
+    
+    // Validate model if provided
+    if (model && typeof model === 'string') {
+      const availableModels = config.cursor.availableModels || [];
+      if (!availableModels.includes(model)) {
+        return res.status(400).json({ 
+          error: `Invalid model: ${model}`,
+          availableModels
+        });
+      }
+    }
+    
+    // ISSUE 6 FIX: Validate notification email if provided
+    // This email is used to send failure/approval notifications for local tasks
+    // (which don't have ClickUp assignees to extract email from)
+    let validatedNotificationEmail: string | undefined;
+    if (notificationEmail && typeof notificationEmail === 'string') {
+      const trimmedEmail = notificationEmail.trim();
+      // Basic email validation pattern
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (trimmedEmail && !emailPattern.test(trimmedEmail)) {
+        return res.status(400).json({ 
+          error: 'Invalid notification email format'
+        });
+      }
+      validatedNotificationEmail = trimmedEmail || undefined;
+    }
+    
+    // Find the client folder
+    const githubCloneAllDir = path.resolve(config.git.githubCloneAllDir || '');
+    let clientFolder = path.join(githubCloneAllDir, normalizedClientName);
+    
+    // Also check in client-websites subdirectory
+    const clientWebsitesPath = path.join(githubCloneAllDir, 'client-websites', normalizedClientName);
+    if (await fs.pathExists(clientWebsitesPath)) {
+      clientFolder = clientWebsitesPath;
+    }
+    
+    // Check if client folder exists
+    if (!await fs.pathExists(clientFolder)) {
+      return res.status(404).json({ 
+        error: `Client folder not found: ${normalizedClientName}`,
+        suggestion: 'Create a client folder first or import a task from ClickUp.'
+      });
+    }
+    
+    // Generate unique local task ID with retry for collision handling
+    const crypto = await import('crypto');
+    let taskId: string;
+    let taskFolder: string;
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    do {
+      const randomBytes = crypto.randomBytes(3).toString('hex');
+      taskId = `local-${Date.now()}-${randomBytes}`;
+      taskFolder = path.join(clientFolder, '.clickup-workflow', taskId);
+      attempts++;
+      
+      // Check for collision (extremely unlikely but handle gracefully)
+      if (await fs.pathExists(taskFolder)) {
+        logger.warn(`Task ID collision detected: ${taskId}, retrying...`);
+        if (attempts >= maxAttempts) {
+          return res.status(409).json({ 
+            error: 'Failed to generate unique task ID. Please try again.' 
+          });
+        }
+        // Small delay before retry
+        await new Promise(resolve => setTimeout(resolve, 10));
+      } else {
+        break;
+      }
+    } while (attempts < maxAttempts);
+    
+    // Create minimal ClickUpTask object for local tasks
+    const timestamp = new Date().toISOString();
+    const localTask: ClickUpTask = {
+      id: taskId,
+      name: trimmedTitle,
+      description: trimmedDescription,
+      status: {
+        status: 'pending',
+        color: '#d3d3d3',
+        type: 'open'
+      },
+      url: '#', // Placeholder - no ClickUp link
+      assignees: []
+    };
+    
+    // Import state management functions
+    const { saveTaskInfo, updateWorkflowState, WorkflowState: WfState } = await import('./state/stateManager');
+    
+    // Create TaskInfo object
+    const taskInfo: TaskInfo = {
+      task: localTask,
+      taskId: taskId,
+      clientName: normalizedClientName,
+      clientFolder: clientFolder,
+      model: model || config.cursor.defaultModel,
+      // ISSUE 6 FIX: Include notification email for local tasks
+      notificationEmail: validatedNotificationEmail
+    };
+    
+    // Save task info
+    await saveTaskInfo(clientFolder, taskId, taskInfo);
+    
+    // Initialize workflow state as PENDING
+    await updateWorkflowState(clientFolder, taskId, WfState.PENDING, {
+      isLocalTask: true,
+      createdVia: 'dashboard',
+      createdAt: timestamp
+    });
+    
+    // ISSUE 4 FIX: Initialize development branch for local tasks
+    // Without this, continueWorkflowAfterAgent will fail with "branch name missing" error
+    // because local tasks bypass the processTask() workflow that normally sets up the branch
+    const { ensureDevBranch } = await import('./git/branchManager');
+    const { saveTaskState } = await import('./state/stateManager');
+    
+    let branchName: string | undefined;
+    try {
+      branchName = await ensureDevBranch(clientFolder);
+      await saveTaskState(clientFolder, taskId, { branchName });
+      logger.info(`Initialized branch ${branchName} for local task ${taskId}`);
+    } catch (branchError: any) {
+      logger.warn(`Could not initialize branch for local task ${taskId}: ${branchError.message}. Branch will be set when agent starts.`);
+      // Don't fail task creation - the agent workflow can still attempt to create the branch later
+    }
+    
+    // Generate CURSOR_TASK.md prompt file so agent has instructions when triggered
+    const { generatePromptFile } = await import('./cursor/promptGenerator');
+    await generatePromptFile(
+      clientFolder,
+      normalizedClientName,
+      localTask,
+      branchName, // ISSUE 4 FIX: Pass the initialized branch name
+      undefined  // testCommand - will be detected when agent runs
+    );
+    
+    logger.info(`Created local task ${taskId} for client ${normalizedClientName}${validatedNotificationEmail ? ` (notifications: ${validatedNotificationEmail})` : ' (no notification email)'}`);
+    
+    res.json({
+      success: true,
+      taskId,
+      taskName: trimmedTitle,
+      clientName: normalizedClientName,
+      clientFolder,
+      branchName: branchName || undefined,
+      // ISSUE 6 FIX: Include notification info in response so caller knows if notifications are configured
+      notificationEmail: validatedNotificationEmail || null,
+      notificationConfigured: !!(validatedNotificationEmail || process.env.APPROVAL_EMAIL_TO),
+      message: 'Local task created successfully'
+    });
+    
+  } catch (error: any) {
+    logger.error(`Error creating local task: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2808,15 +3185,42 @@ app.post('/api/tasks/:taskId/trigger-agent', async (req: Request, res: Response)
 
     res.json({ success: true, message: 'Cursor agent triggered successfully' });
   } catch (error: any) {
+    // Check for credit limit errors - return specific status code for frontend handling
+    if (error.creditError || error.errorCategory === 'credit_limit') {
+      logger.error(`Credit limit error for task ${req.params.taskId}: ${error.message}`);
+      return res.status(402).json({
+        success: false,
+        error: 'AI credits exhausted',
+        creditError: true,
+        errorCategory: 'credit_limit',
+        userMessage: 'Your Cursor AI credits have been exhausted. Please wait for credits to reset or upgrade your plan.',
+        retryable: true,
+        retryAfterMinutes: 60
+      });
+    }
+    
     // Check for model-specific errors
     if (error.modelError) {
       return res.status(422).json({
+        success: false,
         error: 'Model unavailable',
         modelError: true,
         failedModel: error.failedModel,
-        availableModels: config.cursor.availableModels
+        availableModels: config.cursor.availableModels,
+        userMessage: `The model "${error.failedModel}" is not available. Please select a different model.`
       });
     }
+    
+    // Check for auth errors
+    if (error.errorCategory === 'auth_error') {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication failed',
+        errorCategory: 'auth_error',
+        userMessage: 'AI agent authentication failed. Please re-authenticate cursor-agent.'
+      });
+    }
+    
     logger.error(`Error triggering agent for task ${req.params.taskId}: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
@@ -3615,6 +4019,140 @@ app.post('/api/cursor/reset', async (req: Request, res: Response) => {
   }
 });
 
+// Get screenshot capture status
+app.get('/api/tasks/:taskId/screenshot-status', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { taskState, clientFolder } = await findTaskById(taskId);
+    
+    if (!taskState) {
+      return res.json({ capturing: false });
+    }
+    
+    // Clamp progress to 0-100 and sanitize phase
+    const rawProgress = taskState?.metadata?.screenshotProgress || 0;
+    const progress = Math.min(100, Math.max(0, typeof rawProgress === 'number' ? rawProgress : 0));
+    const phase = ['before', 'after'].includes(taskState?.metadata?.screenshotPhase) 
+      ? taskState?.metadata?.screenshotPhase || 'before'
+      : 'before';
+    
+    res.json({
+      capturing: Boolean(taskState?.metadata?.capturingScreenshots),
+      phase,
+      progress
+    });
+  } catch (error: any) {
+    logger.error(`Error getting screenshot status for task ${req.params.taskId}: ${error.message}`);
+    res.json({ capturing: false, phase: 'before', progress: 0 });
+  }
+});
+
+// Retry screenshot capture
+app.post('/api/tasks/:taskId/retry-screenshots', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { taskState, taskInfo, clientFolder } = await findTaskById(taskId);
+    
+    if (!taskState || !taskInfo || !clientFolder) {
+      return res.status(404).json({ success: false, error: 'Task not found' });
+    }
+    
+    // Check if screenshots are already being captured (race condition prevention)
+    if (taskState.metadata?.capturingScreenshots) {
+      return res.status(409).json({ 
+        success: false, 
+        error: 'Screenshot capture is already in progress' 
+      });
+    }
+    
+    // Start screenshot capture in background
+    (async () => {
+      const { VisualTester } = await import('./utils/visualTesting');
+      const { updateWorkflowState, loadTaskState } = await import('./state/stateManager');
+      let visualTester: any = null;
+      let appStarted = false;
+      
+      try {
+        visualTester = new VisualTester();
+        
+        // Clear error state and set capturing flag
+        await updateWorkflowState(clientFolder, taskId, taskState.state, {
+          screenshotCaptureSuccess: undefined,
+          screenshotError: undefined
+        });
+        
+        // Start app and capture screenshots
+        const url = await visualTester.startApp(clientFolder);
+        appStarted = true;
+        
+        // Warmup
+        logger.info(`Waiting for app warmup before retry screenshots...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Health check
+        try {
+          const healthCheck = await visualTester.performHealthCheck(url);
+          if (healthCheck.errors.length > 0) {
+            logger.warn(`App health check found ${healthCheck.errors.length} issues, but continuing with screenshots`);
+          }
+        } catch (healthError: any) {
+          logger.warn(`Health check failed: ${healthError.message}, but continuing with screenshots`);
+        }
+        
+        // Re-fetch current state to avoid stale state issues
+        const currentState = await loadTaskState(clientFolder, taskId);
+        const isBeforePhase = !currentState?.metadata?.initialScreenshots;
+        const phase = isBeforePhase ? 'before' : 'after';
+        
+        const screenshotResult = await visualTester.takeSiteScreenshots(url, taskId, phase, 0, {
+          maxPages: config.screenshots?.maxPages ?? 20,
+          captureSections: config.screenshots?.captureSections ?? true
+        }, clientFolder);
+        
+        // Check if capture was actually successful
+        if (!screenshotResult || !screenshotResult.success) {
+          throw new Error(screenshotResult?.error || 'Screenshot capture failed');
+        }
+        
+        // Update state with success (use current state, not stale one)
+        const finalState = await loadTaskState(clientFolder, taskId);
+        await updateWorkflowState(clientFolder, taskId, finalState?.state || taskState.state, {
+          screenshotCaptureSuccess: true,
+          [isBeforePhase ? 'initialScreenshots' : 'afterScreenshots']: screenshotResult ? [`/screenshots/${taskId}/${phase}_0/home/__fullpage.png`] : [],
+          screenshotManifest: screenshotResult?.manifestPath
+        });
+        
+        logger.info(`Screenshot retry successful for task ${taskId}`);
+      } catch (err: any) {
+        logger.error(`Screenshot retry failed for ${taskId}: ${err.message}`);
+        
+        // Get current state for error update
+        const currentState = await loadTaskState(clientFolder, taskId).catch(() => null);
+        await updateWorkflowState(clientFolder, taskId, currentState?.state || taskState.state, {
+          screenshotCaptureSuccess: false,
+          screenshotError: err.message || 'Unknown error during screenshot capture'
+        });
+      } finally {
+        // Ensure app is stopped if it was started
+        if (appStarted && visualTester) {
+          try {
+            await visualTester.stopApp();
+          } catch (stopErr: any) {
+            logger.warn(`Failed to stop app after retry: ${stopErr.message}`);
+          }
+        }
+      }
+    })().catch(err => {
+      logger.error(`Screenshot retry background task failed: ${err.message}`);
+    });
+    
+    res.json({ success: true, message: 'Screenshot capture restarted' });
+  } catch (error: any) {
+    logger.error(`Error retrying screenshots for task ${req.params.taskId}: ${error.message}`);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Get task details
 app.get('/api/tasks/:taskId', async (req: Request, res: Response) => {
   try {
@@ -3658,7 +4196,9 @@ app.get('/api/tasks/:taskId', async (req: Request, res: Response) => {
       logger.warn(`Could not fetch agent status for task ${taskId}: ${error}`);
     }
 
-    if (refresh === 'true' && clientFolder) {
+    // Skip ClickUp refresh for local tasks (they don't exist in ClickUp)
+    const isLocalTask = taskId.startsWith('local-');
+    if (refresh === 'true' && clientFolder && !isLocalTask) {
       try {
         const { clickUpApiClient } = await import('./clickup/apiClient');
         const updatedTask = await clickUpApiClient.getTask(taskId);
@@ -3719,14 +4259,17 @@ app.patch('/api/tasks/:taskId/description', async (req: Request, res: Response) 
     const { saveTaskInfo } = await import('./state/stateManager');
     await saveTaskInfo(clientFolder, taskId, taskInfo);
 
-    // Update ClickUp task
-    try {
-      const { clickUpApiClient } = await import('./clickup/apiClient');
-      await clickUpApiClient.updateTaskDescription(taskId, description);
-      logger.info(`Updated ClickUp description for task ${taskId}`);
-    } catch (clickupError: any) {
-      logger.warn(`Could not update ClickUp description for task ${taskId}: ${clickupError.message}`);
-      // Don't fail the whole request if ClickUp update fails, as local state is updated
+    // Update ClickUp task (skip for local tasks)
+    const isLocalTask = taskId.startsWith('local-');
+    if (!isLocalTask) {
+      try {
+        const { clickUpApiClient } = await import('./clickup/apiClient');
+        await clickUpApiClient.updateTaskDescription(taskId, description);
+        logger.info(`Updated ClickUp description for task ${taskId}`);
+      } catch (clickupError: any) {
+        logger.warn(`Could not update ClickUp description for task ${taskId}: ${clickupError.message}`);
+        // Don't fail the whole request if ClickUp update fails, as local state is updated
+      }
     }
 
     // Update CURSOR_TASK.md if task is in progress
@@ -3736,7 +4279,10 @@ app.patch('/api/tasks/:taskId/description', async (req: Request, res: Response) 
         const { generatePromptFile } = await import('./cursor/promptGenerator');
         const { detectTestFramework } = await import('./testing/testRunner');
         const testCommand = await detectTestFramework(clientFolder);
-        const client = taskInfo.task.custom_fields?.find((f: any) => f.name === 'Client Name')?.value || 'Unknown';
+        // For local tasks, use clientName from taskInfo; for ClickUp tasks, try custom_fields
+        const client = taskInfo.clientName || 
+                       taskInfo.task.custom_fields?.find((f: any) => f.name === 'Client Name')?.value || 
+                       'Unknown';
         await generatePromptFile(clientFolder, client, taskInfo.task, taskState.branchName, testCommand || undefined);
         logger.info(`Updated CURSOR_TASK.md for task ${taskId} with new description`);
       } catch (promptError: any) {

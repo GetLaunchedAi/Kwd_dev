@@ -251,12 +251,15 @@ class DemoStatusManager {
 
   /**
    * Read status from disk (single source of truth)
+   * FIX: Added forceRefresh parameter to bypass cache when consistency is critical
    */
-  async read(clientSlug: string): Promise<any | null> {
-    // Check cache first
-    const cached = this.cache.get(clientSlug);
-    if (cached && (Date.now() - cached._cacheTime) < this.CACHE_TTL_MS) {
-      return { ...cached }; // Return a copy to prevent mutation
+  async read(clientSlug: string, forceRefresh: boolean = false): Promise<any | null> {
+    // Check cache first (unless forced refresh)
+    if (!forceRefresh) {
+      const cached = this.cache.get(clientSlug);
+      if (cached && (Date.now() - cached._cacheTime) < this.CACHE_TTL_MS) {
+        return { ...cached }; // Return a copy to prevent mutation
+      }
     }
 
     // Read from disk
@@ -270,6 +273,8 @@ class DemoStatusManager {
         return { ...status }; // Return a copy to prevent mutation
       } catch (error: any) {
         logger.error(`Failed to read demo status for ${clientSlug}: ${error.message}`);
+        // FIX: On read error, also clear stale cache entry to prevent serving corrupted data
+        this.cache.delete(clientSlug);
         return null;
       }
     }
@@ -548,12 +553,68 @@ export async function isSlugAvailable(slug: string): Promise<{ available: boolea
   }
 
   // Check if demo is in active creation
-  const status = await demoStatusManager.read(normalized);
+  // FIX: Force refresh from disk to avoid stale cache during rapid creation attempts
+  const status = await demoStatusManager.read(normalized, true);
   if (status && isDemoInActiveCreation(status)) {
     return { available: false, reason: 'This project is currently being created.' };
   }
 
   return { available: true };
+}
+
+/**
+ * Atomically reserves a slug, returning the reserved slug or throwing if unable.
+ * This prevents race conditions between availability check and reservation.
+ * FIX: Added proper error handling and cleanup for audit log failures
+ */
+async function atomicSlugReservation(slug: string): Promise<void> {
+  let reserved = false;
+  
+  try {
+    // Double-check availability and reserve atomically using atomicUpdate
+    await demoStatusManager.atomicUpdate(slug, (currentStatus) => {
+      // If status exists and is actively being created, fail
+      if (currentStatus && isDemoInActiveCreation(currentStatus)) {
+        throw new Error(`Slug "${slug}" was claimed by another request during reservation.`);
+      }
+      
+      // Reserve it
+      return {
+        state: 'starting',
+        message: 'Reserving slug for demo creation...',
+        logs: currentStatus?.logs || [],
+        currentStep: 1,
+        totalSteps: 4,
+        taskId: `demo-${slug}`,
+        updatedAt: new Date().toISOString()
+      };
+    });
+    
+    reserved = true;
+    
+  } catch (error: any) {
+    // FIX: If reservation failed, ensure we clean up any partial state
+    // This handles edge cases where atomicUpdate succeeds but throws in callback
+    if (!reserved) {
+      try {
+        demoStatusManager.clearCache(slug);
+        
+        // Also clean up from audit log if partially written
+        const activeDemosPath = path.join(process.cwd(), 'logs', 'active-demos.json');
+        if (await fs.pathExists(activeDemosPath)) {
+          const activeDemos = await fs.readJson(activeDemosPath);
+          if (activeDemos[slug] && activeDemos[slug].state === 'starting') {
+            delete activeDemos[slug];
+            await fs.writeJson(activeDemosPath, activeDemos, { spaces: 2 });
+          }
+        }
+      } catch (cleanupErr: any) {
+        logger.warn(`Could not clean up failed slug reservation for ${slug}: ${cleanupErr.message}`);
+      }
+    }
+    
+    throw error;
+  }
 }
 
 /**
@@ -613,11 +674,14 @@ async function findImagesDir(demoDir: string): Promise<string> {
 
 /**
  * Checks if a demo is currently in an active creation state
+ * FIX: Added more robust staleness detection with configurable timeout
  */
 export function isDemoInActiveCreation(status: any): boolean {
   if (!status || !status.state) return false;
   
-  const activeStates = ['cloning', 'installing', 'organizing', 'prompting', 'triggering'];
+  // FIX: Include 'starting' state to prevent race conditions during slug reservation phase
+  // Also include 'running' since agent may still be executing
+  const activeStates = ['starting', 'cloning', 'installing', 'organizing', 'prompting', 'triggering', 'running'];
   if (!activeStates.includes(status.state)) return false;
 
   // Check for stale state (older than 30 minutes)
@@ -627,6 +691,13 @@ export function isDemoInActiveCreation(status: any): boolean {
     const staleTime = 30 * 60 * 1000; // 30 minutes
     if (now - updatedAt > staleTime) {
       logger.warn(`Demo creation state "${status.state}" is stale (last update: ${status.updatedAt}).`);
+      return false;
+    }
+  } else {
+    // FIX: If no updatedAt timestamp, treat as potentially stale if state is 'starting'
+    // This handles edge case where status was written but updatedAt wasn't set
+    if (status.state === 'starting') {
+      logger.warn(`Demo in 'starting' state has no updatedAt timestamp - treating as stale`);
       return false;
     }
   }
@@ -647,24 +718,47 @@ export async function generateUniqueSlug(businessName: string, providedSlug?: st
   if (!availability.available && !providedSlug) {
     const baseSlug = clientSlug;
     let attempts = 0;
+    let foundAvailable = false;
     while (attempts < 5) {
       const suffix = Math.random().toString(36).substring(2, 6);
       clientSlug = `${baseSlug}-${suffix}`;
       const check = await isSlugAvailable(clientSlug);
-      if (check.available) break;
+      if (check.available) {
+        foundAvailable = true;
+        break;
+      }
       attempts++;
     }
+    
+    // FIX: If random suffix attempts failed, use timestamp-based unique suffix as guaranteed fallback
+    if (!foundAvailable) {
+      const timestampSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 4)}`;
+      clientSlug = `${baseSlug}-${timestampSuffix}`;
+      const finalCheck = await isSlugAvailable(clientSlug);
+      if (!finalCheck.available) {
+        // Extremely rare - only if timestamp collision occurs within same millisecond
+        throw new Error(`Could not generate unique slug for "${businessName}" after multiple attempts. Please provide a different business name or manual slug.`);
+      }
+      logger.info(`Generated timestamp-based slug after ${attempts} random attempts: ${clientSlug}`);
+    }
+  } else if (!availability.available && providedSlug) {
+    // User provided a specific slug that's not available - fail explicitly
+    throw new Error(availability.reason || `Slug "${clientSlug}" is not available.`);
   }
 
-  // Reserve the slug immediately to prevent race conditions
-  await demoStatusManager.write(clientSlug, {
-    state: 'starting',
-    message: 'Reserving slug for demo creation...',
-    logs: [],
-    currentStep: 1,
-    totalSteps: 4,
-    taskId: `demo-${clientSlug}`
-  });
+  // FIX: Use atomic reservation to prevent race conditions between check and reserve
+  try {
+    await atomicSlugReservation(clientSlug);
+  } catch (e: any) {
+    // If atomic reservation fails, another request claimed it - generate new slug
+    if (!providedSlug) {
+      const suffix = Math.random().toString(36).substring(2, 8);
+      clientSlug = `${normalizeSlug(businessName)}-${suffix}`;
+      await atomicSlugReservation(clientSlug);
+    } else {
+      throw e; // User provided slug, can't auto-recover
+    }
+  }
 
   return clientSlug;
 }
@@ -677,6 +771,32 @@ export async function generateUniqueSlug(businessName: string, providedSlug?: st
  */
 export async function createDemo(data: any, files: any) {
   const businessName = data.businessName;
+  
+  // FIX: Validate template and git settings BEFORE reserving slug to avoid ghost reservations
+  // 0. Validate git settings before starting (pre-flight check)
+  if (!areGitSettingsConfigured()) {
+    throw new Error(
+      'Git configuration is incomplete. Please configure git settings in config.json ' +
+      '(required: clientWebsitesDir, defaultBranch, githubToken, userName, userEmail).'
+    );
+  }
+
+  // 1. Resolve template repo URL first (validate before any state changes)
+  let repoUrl = data.githubRepoUrl;
+  
+  // Resolve templateId if githubRepoUrl is missing
+  if (!repoUrl && data.templateId) {
+    repoUrl = TEMPLATE_MAP[data.templateId];
+    if (!repoUrl) {
+      throw new Error(`Invalid template selection: ${data.templateId}. Please choose a valid template.`);
+    }
+  }
+
+  if (!repoUrl) {
+    throw new Error('No template repository URL or valid templateId provided. Please select a template or provide a repository URL.');
+  }
+  
+  // 2. NOW generate and reserve slug (after validation passes)
   const clientSlug = data.clientSlug || await generateUniqueSlug(businessName);
   
   const demoDir = path.join(process.cwd(), 'client-websites', clientSlug);
@@ -684,30 +804,7 @@ export async function createDemo(data: any, files: any) {
   logger.info(`Starting demo creation for: ${businessName} (${clientSlug})`);
   
   try {
-    // 0. Validate git settings before starting (pre-flight check)
-    if (!areGitSettingsConfigured()) {
-      throw new Error(
-        'Git configuration is incomplete. Please configure git settings in config.json ' +
-        '(required: clientWebsitesDir, defaultBranch, githubToken, userName, userEmail).'
-      );
-    }
-
-    // 1. Resolve template repo URL first (needed for cloning)
-    let repoUrl = data.githubRepoUrl;
-    
-    // Resolve templateId if githubRepoUrl is missing
-    if (!repoUrl && data.templateId) {
-      repoUrl = TEMPLATE_MAP[data.templateId];
-      if (!repoUrl) {
-        throw new Error(`Invalid template selection: ${data.templateId}`);
-      }
-    }
-
-    if (!repoUrl) {
-      throw new Error('No template repository URL or valid templateId provided.');
-    }
-
-    // 2. Prevent collisions - check status from single source of truth
+    // 3. Prevent collisions - check status from single source of truth  
     const currentStatus = await demoStatusManager.read(clientSlug);
     const dirExists = await fs.pathExists(demoDir);
 
@@ -731,6 +828,10 @@ export async function createDemo(data: any, files: any) {
       while (!removed && attempts < 3) {
         try {
           await fs.remove(demoDir);
+          // FIX: Verify the directory was actually removed before marking as success
+          if (await fs.pathExists(demoDir)) {
+            throw new Error('Directory still exists after remove operation');
+          }
           removed = true;
         } catch (removeError: any) {
           attempts++;
@@ -742,6 +843,11 @@ export async function createDemo(data: any, files: any) {
             throw new Error(`Could not clean up existing demo folder. Please ensure no files or terminals are open in "${clientSlug}".`);
           }
         }
+      }
+      
+      // FIX: Final verification that cleanup succeeded
+      if (await fs.pathExists(demoDir)) {
+        throw new Error(`Directory ${demoDir} still exists after cleanup attempts. Please close any open files or processes.`);
       }
     }
     
@@ -763,6 +869,23 @@ export async function createDemo(data: any, files: any) {
       await updateStatus(clientSlug, 'cloning', `Cloning template for ${businessName}...`, `Successfully cloned template from ${cloneUrl}`);
     } catch (cloneError: any) {
       logger.error(`Failed to clone repository ${cloneUrl}: ${cloneError.message}`);
+      
+      // FIX: Clear the slug reservation from cache and audit log so the slug can be reused
+      // This prevents ghost reservations when clone fails
+      demoStatusManager.clearCache(clientSlug);
+      try {
+        const activeDemosPath = path.join(process.cwd(), 'logs', 'active-demos.json');
+        if (await fs.pathExists(activeDemosPath)) {
+          const activeDemos = await fs.readJson(activeDemosPath);
+          if (activeDemos[clientSlug]) {
+            delete activeDemos[clientSlug];
+            await fs.writeJson(activeDemosPath, activeDemos, { spaces: 2 });
+          }
+        }
+      } catch (cleanupErr) {
+        logger.warn(`Could not clean up failed slug reservation: ${cleanupErr}`);
+      }
+      
       const sshHint = useSSH ? ' If using SSH, ensure your SSH key is added to GitHub.' : '';
       throw new Error(`Failed to clone template repository.${sshHint} Please ensure the URL is correct and the repository is accessible. Error: ${cloneError.message}`);
     }
@@ -902,6 +1025,21 @@ export async function createDemo(data: any, files: any) {
       branchName: targetBranch
     });
 
+    // FIX: Create initial checkpoint (step 0) before any demo steps begin
+    // This enables recovery if step 1 fails by providing a valid rollback point
+    try {
+      const { createCheckpoint } = await import('../state/checkpointService');
+      const initialCheckpoint = await createCheckpoint(demoDir, mockTask.id, 0, 'initial');
+      if (initialCheckpoint.success) {
+        logger.info(`Created initial checkpoint (step 0) for ${clientSlug}: ${initialCheckpoint.checkpoint?.gitCommitHash}`);
+      } else {
+        logger.warn(`Could not create initial checkpoint for ${clientSlug}: ${initialCheckpoint.error}`);
+      }
+    } catch (cpErr: any) {
+      logger.warn(`Error creating initial checkpoint for ${clientSlug}: ${cpErr.message}`);
+      // Non-fatal - demo can still proceed without initial checkpoint
+    }
+
     // Get ImageRetriever path (absolute path for the agent to use)
     const imageRetrieverPath = imageRetrieverService.getImageRetrieverPath();
     
@@ -990,6 +1128,29 @@ export async function createDemo(data: any, files: any) {
       } catch (e) {
         // Ignore errors in status update during error handling
       }
+      
+      // FIX: If demo directory doesn't exist (clone failed or pre-clone error),
+      // clear the slug reservation so it can be reused
+      const demoDirCheck = path.join(process.cwd(), 'client-websites', clientSlug);
+      const dirExists = await fs.pathExists(demoDirCheck);
+      
+      if (!dirExists) {
+        logger.info(`Clearing slug reservation for ${clientSlug} after failure (directory not created)`);
+        demoStatusManager.clearCache(clientSlug);
+        
+        try {
+          const activeDemosPath = path.join(process.cwd(), 'logs', 'active-demos.json');
+          if (await fs.pathExists(activeDemosPath)) {
+            const activeDemos = await fs.readJson(activeDemosPath);
+            if (activeDemos[clientSlug]) {
+              delete activeDemos[clientSlug];
+              await fs.writeJson(activeDemosPath, activeDemos, { spaces: 2 });
+            }
+          }
+        } catch (cleanupErr: any) {
+          logger.warn(`Could not clean up failed slug reservation from audit log: ${cleanupErr.message}`);
+        }
+      }
     }
     
     throw error;
@@ -1061,10 +1222,16 @@ function estimateProgressFromEvents(agentLogs: any[]): number {
 
 /**
  * Gets the status of a demo creation (single source of truth)
+ * FIX: Added safeguards for log merging and format validation
  */
 export async function getDemoStatus(clientSlug: string) {
   const status = await demoStatusManager.read(clientSlug);
   if (!status) return null;
+
+  // FIX: Ensure logs is always an array to prevent merge errors
+  if (!Array.isArray(status.logs)) {
+    status.logs = status.logs ? [String(status.logs)] : [];
+  }
 
   // If the demo is running or transitioning, merge real-time logs from TaskStatusManager
   // to provide detailed agent progress on the demo creation page.
@@ -1152,15 +1319,31 @@ export async function getDemoStatus(clientSlug: string) {
   return status;
 }
 
+// Track in-flight advanceDemoStep calls to prevent concurrent execution
+const advanceStepLocks = new Map<string, { timestamp: number; step: number }>();
+const ADVANCE_LOCK_TIMEOUT_MS = 60000; // 1 minute timeout for advance locks
+
 /**
  * Advances the demo to the next step after approval.
  * Generates a new CURSOR_TASK.md and triggers the agent for the next step.
+ * FIX: Added lock mechanism to prevent concurrent advance calls
  */
 export async function advanceDemoStep(clientSlug: string): Promise<void> {
   const demoDir = path.join(process.cwd(), 'client-websites', clientSlug);
   
-  // Read current status
-  const status = await demoStatusManager.read(clientSlug);
+  // FIX: Check for existing advance lock to prevent concurrent calls
+  const existingLock = advanceStepLocks.get(clientSlug);
+  if (existingLock) {
+    const lockAge = Date.now() - existingLock.timestamp;
+    if (lockAge < ADVANCE_LOCK_TIMEOUT_MS) {
+      throw new Error(`Demo ${clientSlug} step ${existingLock.step} is already being advanced (started ${Math.round(lockAge / 1000)}s ago). Please wait.`);
+    }
+    // Lock is stale, remove it
+    advanceStepLocks.delete(clientSlug);
+  }
+  
+  // Read current status with force refresh to avoid stale cache
+  const status = await demoStatusManager.read(clientSlug, true);
   if (!status) {
     throw new Error(`Demo status not found for ${clientSlug}`);
   }
@@ -1173,6 +1356,44 @@ export async function advanceDemoStep(clientSlug: string): Promise<void> {
     throw new Error(`Demo ${clientSlug} is already at the final step`);
   }
   
+  // FIX: Verify the current step is actually in a completed/approvable state
+  // Note: 'completed' is NOT a valid state for advancing - it means the entire demo is finished
+  // Only 'awaiting_approval' means a step finished and is ready for the next step
+  const currentState = status.state || 'unknown';
+  
+  // FIX: Remove 'completed' from valid states - 'completed' means entire demo is done, not step
+  if (currentState !== 'awaiting_approval') {
+    throw new Error(`Cannot advance demo ${clientSlug}: current step is in "${currentState}" state. Only awaiting_approval steps can be advanced to the next step.`);
+  }
+  
+  // FIX: Additional validation - check task state to ensure agent actually completed
+  const baseTaskId = `demo-${clientSlug}`;
+  const stepTaskId = currentStep === 1 ? baseTaskId : `${baseTaskId}-step${currentStep}`;
+  const { loadTaskState, WorkflowState } = await import('../state/stateManager');
+  const taskState = await loadTaskState(demoDir, stepTaskId);
+  
+  if (taskState && taskState.state === WorkflowState.ERROR) {
+    throw new Error(`Cannot advance demo ${clientSlug}: step ${currentStep} is in ERROR state. Please resolve the error first.`);
+  }
+  
+  if (taskState && taskState.state === WorkflowState.IN_PROGRESS) {
+    throw new Error(`Cannot advance demo ${clientSlug}: step ${currentStep} is still running. Please wait for it to complete.`);
+  }
+  
+  // FIX: Prevent double-advance by checking if step was recently advanced
+  const lastAdvancedStep = status.lastAdvancedStep;
+  const lastAdvancedAt = status.lastAdvancedAt;
+  if (lastAdvancedStep === currentStep && lastAdvancedAt) {
+    const timeSinceAdvance = Date.now() - new Date(lastAdvancedAt).getTime();
+    if (timeSinceAdvance < 10000) { // Within 10 seconds
+      throw new Error(`Step ${currentStep} was already advanced ${Math.round(timeSinceAdvance / 1000)} seconds ago. Please wait for the next step to start.`);
+    }
+  }
+  
+  // FIX: Acquire advance lock before proceeding
+  advanceStepLocks.set(clientSlug, { timestamp: Date.now(), step: currentStep });
+  
+  try {
   logger.info(`Advancing demo ${clientSlug} from step ${currentStep} to step ${nextStep}`);
   
   // Validate git setup before advancing to next step (safety check)
@@ -1200,12 +1421,15 @@ export async function advanceDemoStep(clientSlug: string): Promise<void> {
   await updateStatus(clientSlug, 'triggering', `Preparing Step ${nextStep}: ${stepName.charAt(0).toUpperCase() + stepName.slice(1)}...`, `Step ${currentStep} approved. Advancing to step ${nextStep}.`);
   
   // Update status with new step number
+  // FIX: Track last advanced step to prevent double-advances
   const newStatus = {
     ...status,
     currentStep: nextStep,
     state: 'triggering',
     message: `Starting Step ${nextStep}: ${stepName.charAt(0).toUpperCase() + stepName.slice(1)}`,
-    logs: status.logs || []
+    logs: status.logs || [],
+    lastAdvancedStep: currentStep,
+    lastAdvancedAt: new Date().toISOString()
   };
   await demoStatusManager.write(clientSlug, newStatus);
   
@@ -1302,6 +1526,10 @@ Complete step ${nextStep} (${stepName}) of the demo customization.
   await updateStatus(clientSlug, 'running', `Cursor agent working on Step ${nextStep}: ${stepName.charAt(0).toUpperCase() + stepName.slice(1)}`, `Agent triggered for step ${nextStep}.`);
   
   logger.info(`Demo ${clientSlug} advanced to step ${nextStep}`);
+  } finally {
+    // FIX: Always release the advance lock (on success or error)
+    advanceStepLocks.delete(clientSlug);
+  }
 }
 
 /**

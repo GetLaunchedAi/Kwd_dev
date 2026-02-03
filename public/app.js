@@ -1175,6 +1175,16 @@ function createDemoCard(task) {
     `;
 }
 
+/**
+ * Checks if a taskId represents a local task (created via dashboard, not imported from ClickUp).
+ * Pattern: local-{timestamp}-{random}
+ * @param {string} taskId 
+ * @returns {boolean}
+ */
+function isLocalTask(taskId) {
+    return taskId && taskId.startsWith('local-');
+}
+
 function createRegularTaskCard(task) {
     const stateClass = task.state.replace(/_/g, '-');
     const updatedAt = FormattingUtils.formatRelativeTime(task.updatedAt);
@@ -1185,6 +1195,9 @@ function createRegularTaskCard(task) {
         ? description.substring(0, 120) + '...' 
         : description;
     
+    // Check if this is a local task (not imported from ClickUp)
+    const isLocal = isLocalTask(task.taskId);
+    const localBadgeHtml = isLocal ? '<span class="local-task-badge">Local</span>' : '';
     
     // Check if task has an active agent step (filter out stale queue messages)
     const isStaleQueueMessage = task.currentStep && (
@@ -1198,10 +1211,11 @@ function createRegularTaskCard(task) {
         : '';
 
     return `
-        <div class="task-card" data-task-id="${task.taskId}">
+        <div class="task-card${isLocal ? ' local-task' : ''}" data-task-id="${task.taskId}">
             <div class="task-card-header">
                 <div class="task-card-header-main">
                     <div class="state-badge-container">
+                        ${localBadgeHtml}
                         <span class="state-badge ${stateClass}">${FormattingUtils.formatState(task.state)}</span>
                         ${stepHtml}
                     </div>
