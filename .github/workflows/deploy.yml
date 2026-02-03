@@ -1,0 +1,54 @@
+name: Deploy to Cloudways
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Cloudways via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.CLOUDWAYS_HOST }}
+          username: ${{ secrets.CLOUDWAYS_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          # If you prefer password auth (not recommended but supported), uncomment next line and comment out 'key'
+          # password: ${{ secrets.CLOUDWAYS_PASS }}
+          port: 22
+          script: |
+            # Navigate to the application directory
+            # NOTE: Update the path below to match your server's application path
+            # It is typically /home/master/applications/[app_name]/public_html
+            # You can find this in Cloudways -> Application -> Application Settings
+            APP_DIR="/home/master/applications/qqmunqdbbw/public_html"
+            
+            echo "Deploying to $APP_DIR..."
+            
+            if [ ! -d "$APP_DIR" ]; then
+              echo "Error: Application directory not found at $APP_DIR"
+              exit 1
+            fi
+            
+            cd $APP_DIR
+            
+            # Pull latest changes
+            # This will NOT overwrite .env files as they are ignored in .gitignore
+            git pull origin main
+            
+            # Install production dependencies
+            npm install --production
+            
+            # Rebuild the application
+            # We need dev dependencies for build, so we might need a separate install step if not committed
+            # Assuming build tools are available or we install all deps then prune
+            npm install
+            npm run build
+            npm prune --production
+            
+            # Restart the application using PM2
+            pm2 restart kwd-cursor-tool || pm2 start ecosystem.config.js
+            
+            echo "Deployment complete!"
