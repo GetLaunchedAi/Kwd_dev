@@ -105,9 +105,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
     
-    loadTaskDetails();
+    loadTaskDetails().then(() => loadAgentLogs());
     loadDiff();
-    loadAgentLogs();
     startConnectionPolling();
     loadAvailableModels();
     
@@ -434,30 +433,26 @@ async function loadAgentLogs(silent = false) {
     
     if (!section || !container) return;
     
-    // Only show logs for active states
-    const activeStates = ['pending', 'in_progress', 'testing'];
-    const showSection = taskData?.taskState && activeStates.includes(taskData.taskState.state);
-    
-    if (!showSection) {
-        // Keep section visible for recently finished tasks (within 30s)
-        const updatedAt = taskData?.taskState?.updatedAt;
-        const recentlyFinished = updatedAt && (Date.now() - new Date(updatedAt).getTime()) < 30000;
-        if (!recentlyFinished) {
-            section.classList.add('hidden');
-            return;
-        }
-    }
+    // Skip if taskData hasn't loaded yet (avoid premature hide on initial race)
+    if (!taskData?.taskState) return;
     
     try {
         const response = await api.get(`/tasks/${taskId}/logs?tail=100`);
         
         if (!response || response.length === 0) {
-            // Show section but with waiting message
-            section.classList.remove('hidden');
-            if (!silent || container.querySelector('.hint')) {
-                container.innerHTML = '<div class="log-entry hint">Waiting for agent activity...</div>';
+            const activeStates = ['pending', 'in_progress', 'testing'];
+            const isActive = activeStates.includes(taskData.taskState.state);
+            if (isActive) {
+                // Show section with waiting message for active tasks
+                section.classList.remove('hidden');
+                if (!silent || container.querySelector('.hint')) {
+                    container.innerHTML = '<div class="log-entry hint">Waiting for agent activity...</div>';
+                }
+                if (countBadge) countBadge.textContent = '0 entries';
+            } else {
+                // No logs and task is finished — hide the section
+                section.classList.add('hidden');
             }
-            if (countBadge) countBadge.textContent = '0 entries';
             return;
         }
         
