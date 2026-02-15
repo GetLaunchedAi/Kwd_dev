@@ -19,40 +19,43 @@ jobs:
           # password: ${{ secrets.CLOUDWAYS_PASS }}
           port: 22
           script: |
-            # Navigate to the application directory
-            # NOTE: Update the path below to match your server's application path
-            # It is typically /home/master/applications/[app_name]/public_html
-            # You can find this in Cloudways -> Application -> Application Settings
+            set -e
+
             APP_DIR="/home/master/applications/qqmunqdbbw/public_html"
-            
+
             echo "Deploying to $APP_DIR..."
-            
+
             if [ ! -d "$APP_DIR" ]; then
               echo "Error: Application directory not found at $APP_DIR"
               exit 1
             fi
-            
+
             cd $APP_DIR
-            
+
+            # Load nvm and switch to a compatible Node version (>=20.19.0)
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            nvm install 20 2>/dev/null || true
+            nvm use 20
+            echo "Using Node $(node -v) / npm $(npm -v)"
+
             # Configure git pull strategy if not set
             git config pull.rebase false 2>/dev/null || true
-            
-            # Pull latest changes
-            # This will NOT overwrite .env files as they are ignored in .gitignore
+
+            # Pull latest changes (.env files are safe — they're in .gitignore)
             git pull origin main
-            
-            # Install production dependencies
-            npm install --production
-            
-            # Rebuild the application
-            # We need dev dependencies for build, so we might need a separate install step if not committed
-            # Assuming build tools are available or we install all deps then prune
+
+            # Install ALL deps (dev deps needed for build/tsc)
             npm install
+
+            # Build the application
             npm run build
-            npm prune --production
-            
-            # Restart the application using PM2 (use npx since pm2 not in PATH)
+
+            # Remove dev dependencies for production
+            npm prune --omit=dev
+
+            # Restart the application using PM2
             npx pm2 restart kwd-cursor-tool || npx pm2 start ecosystem.config.js
-            
+
             echo "Deployment complete!"
 
