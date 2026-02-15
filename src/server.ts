@@ -2011,7 +2011,7 @@ app.post('/workflow/continue/:taskId', async (req: Request, res: Response) => {
 // Create local task endpoint - creates a task without ClickUp
 app.post('/api/tasks/create', async (req: Request, res: Response) => {
   try {
-    const { title, description, clientName, model, notificationEmail } = req.body;
+    const { title, description, clientName, model, notificationEmail, systemPrompt } = req.body;
     
     // Validate required fields
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -2178,13 +2178,20 @@ app.post('/api/tasks/create', async (req: Request, res: Response) => {
     
     // Generate CURSOR_TASK.md prompt file so agent has instructions when triggered
     const { generatePromptFile } = await import('./cursor/promptGenerator');
-    await generatePromptFile(
+    const promptPath = await generatePromptFile(
       clientFolder,
       normalizedClientName,
       localTask,
       branchName, // ISSUE 4 FIX: Pass the initialized branch name
       undefined  // testCommand - will be detected when agent runs
     );
+    
+    // If custom system prompt is provided, overwrite the generated prompt file
+    if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim().length > 0) {
+      const trimmedSystemPrompt = systemPrompt.trim();
+      await fs.writeFile(promptPath, trimmedSystemPrompt, 'utf-8');
+      logger.info(`Custom system prompt saved for task ${taskId} at ${promptPath}`);
+    }
     
     logger.info(`Created local task ${taskId} for client ${normalizedClientName}${validatedNotificationEmail ? ` (notifications: ${validatedNotificationEmail})` : ' (no notification email)'}`);
     

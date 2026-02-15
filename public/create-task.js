@@ -169,6 +169,7 @@ async function handleSubmit(e) {
     const description = document.getElementById('taskDescription').value.trim();
     const clientName = document.getElementById('clientSelect').value;
     const model = document.getElementById('modelSelect').value;
+    const systemPrompt = document.getElementById('systemPrompt').value.trim();
     
     // Validate again
     if (!title || !description || !clientName) {
@@ -190,7 +191,8 @@ async function handleSubmit(e) {
                 title,
                 description,
                 clientName,
-                model: model || undefined
+                model: model || undefined,
+                systemPrompt: systemPrompt || undefined
             })
         });
         
