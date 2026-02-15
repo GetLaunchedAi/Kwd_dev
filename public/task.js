@@ -472,11 +472,12 @@ async function loadAgentLogs(silent = false) {
             // Build logs HTML
             const logsHtml = response.map(log => {
                 const timestamp = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
-                const message = log.line || log.message || log.step || JSON.stringify(log);
+                const rawMessage = log.line || log.message || log.step || '';
+                const message = typeof rawMessage === 'string' ? rawMessage : JSON.stringify(rawMessage);
                 
                 // Determine log type for styling
                 let logClass = '';
-                const msgLower = message.toLowerCase();
+                const msgLower = (message || '').toLowerCase();
                 
                 if (msgLower.includes('error') || msgLower.includes('failed')) {
                     logClass = 'error';
