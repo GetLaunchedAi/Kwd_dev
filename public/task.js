@@ -449,6 +449,13 @@ async function loadAgentLogs(silent = false) {
                     container.innerHTML = '<div class="log-entry hint">Waiting for agent activity...</div>';
                 }
                 if (countBadge) countBadge.textContent = '0 entries';
+            } else if (taskData.taskState.state === 'error') {
+                // Show section for error state (may help diagnose what went wrong)
+                section.classList.remove('hidden');
+                if (!silent || container.querySelector('.hint')) {
+                    container.innerHTML = '<div class="log-entry hint">No agent activity recorded</div>';
+                }
+                if (countBadge) countBadge.textContent = '0 entries';
             } else {
                 // No logs and task is finished — hide the section
                 section.classList.add('hidden');
@@ -602,6 +609,14 @@ function startAutoRefresh() {
     
     const runPoll = async () => {
         if (document.visibilityState !== 'visible' || !shouldPoll()) {
+            // FIX: Do one final load of task details and logs before stopping
+            // so any completion-phase log entries (testing, approval) are captured
+            try {
+                await loadTaskDetails({ silent: true });
+                await loadAgentLogs(true);
+            } catch (e) {
+                // Best-effort final refresh
+            }
             stopAutoRefresh();
             return;
         }

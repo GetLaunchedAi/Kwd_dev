@@ -4170,7 +4170,9 @@ app.get('/api/tasks/:taskId', async (req: Request, res: Response) => {
 
     // Inject real-time agent step if task is currently running or queued
     try {
-      const taskStatus = await taskStatusManager.getStatus(taskId);
+      // FIX: Use clientFolder as overrideRoot so we read the runner's status from
+      // {clientFolder}/.cursor/status/current.json instead of the server's own .cursor/status/
+      const taskStatus = await taskStatusManager.getStatus(taskId, clientFolder || undefined);
       if (taskStatus && (taskStatus.state === 'RUNNING' || taskStatus.state === 'STARTING')) {
         taskState.currentStep = taskStatus.step;
         if (taskStatus.command) {

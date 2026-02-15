@@ -346,6 +346,20 @@ async function _continueWorkflowAfterAgentInternal(
 ): Promise<void> {
   logger.info(`Continuing workflow for run ${runId} after agent completion`);
 
+  // Import taskStatusManager for workflow completion logging
+  const { taskStatusManager } = await import('../cursor/taskStatusManager');
+
+  // Helper to append a workflow event to the task's events.ndjson log
+  const logEvent = async (message: string, type: string = 'workflow') => {
+    try {
+      await taskStatusManager.appendLog(runId, { type, message, step: message }, clientFolder);
+    } catch (e) {
+      // Best-effort logging — don't break the workflow
+    }
+  };
+
+  await logEvent('Agent completed — starting post-completion workflow', 'completion');
+
   // 1. Load state and info early
   const state = await loadTaskState(clientFolder, runId);
   const runInfo = await loadTaskInfo(clientFolder, runId);
@@ -387,6 +401,8 @@ async function _continueWorkflowAfterAgentInternal(
   let screenshotCaptureSuccess = false;
   let screenshotError: string | undefined;
   
+  await logEvent('Capturing screenshots and diff artifacts...', 'workflow');
+
   let appStartedForAfter = false;
   try {
     // Take "after" screenshots for this step
@@ -475,6 +491,7 @@ async function _continueWorkflowAfterAgentInternal(
   } catch (artifactError: any) {
     screenshotError = artifactError.message;
     logger.warn(`Could not capture step artifacts: ${artifactError.message}`);
+    await logEvent(`Warning: Screenshot capture failed — ${artifactError.message}`, 'warning');
     // Update state to record the failure
     await updateWorkflowState(clientFolder, runId, WorkflowState.IN_PROGRESS, {
       screenshotCaptureSuccess: false,
@@ -489,6 +506,10 @@ async function _continueWorkflowAfterAgentInternal(
         logger.warn(`Failed to stop app after after screenshots: ${stopError.message}`);
       }
     }
+  }
+
+  if (screenshotCaptureSuccess) {
+    await logEvent('✓ Screenshots captured successfully', 'success');
   }
 
   // 3. Handle multi-step demo customization transitions
@@ -534,6 +555,7 @@ async function _continueWorkflowAfterAgentInternal(
   try {
     // Step 1: Update state to testing
     await updateWorkflowState(clientFolder, runId, WorkflowState.TESTING, undefined, 'Running tests');
+    await logEvent('Running automated tests...', 'workflow');
 
     // Step 2: Detect and run tests
     const testCommand = await detectTestFramework(clientFolder);
@@ -546,6 +568,7 @@ async function _continueWorkflowAfterAgentInternal(
     // Step 3: If tests fail, notify and stop
     if (!testResult.success) {
       logger.error(`Tests failed for task ${taskId} (runId: ${runId})`);
+      await logEvent(`✗ Tests failed: ${testResult.error || 'Unknown test error'}`, 'error');
       await updateWorkflowState(clientFolder, runId, WorkflowState.ERROR, {
         testError: testResult.error,
       }, 'Tests failed');
@@ -605,7 +628,9 @@ async function _continueWorkflowAfterAgentInternal(
     }
 
     // Step 4: Generate change summary
+    await logEvent('✓ Tests passed', 'success');
     await updateWorkflowState(clientFolder, runId, WorkflowState.TESTING, undefined, 'Generating change summary');
+    await logEvent('Generating change summary and diff...', 'workflow');
     const changeSummary = await generateChangeSummary(clientFolder, branchName, state.baseCommitHash);
     
     // Step 4.5: Save artifacts (diff and summary)
@@ -639,9 +664,12 @@ async function _continueWorkflowAfterAgentInternal(
     
     await saveArtifact(taskId, 'summary.md', summaryMd, process.cwd(), iteration);
 
+    await logEvent(`✓ Change summary: ${changeSummary.filesModified} files, +${changeSummary.linesAdded}/-${changeSummary.linesRemoved} lines`, 'success');
+
     // Step 5: Create approval request and send notifications
     // First: persist state = AWAITING_APPROVAL
     await updateWorkflowState(clientFolder, runId, WorkflowState.AWAITING_APPROVAL, undefined, 'Creating approval request');
+    await logEvent('Creating approval request...', 'workflow');
 
     try {
       // Then: attempt to send/create the approval request (Slack/email/dashboard)
@@ -663,10 +691,12 @@ async function _continueWorkflowAfterAgentInternal(
       }
 
       logger.info(`Approval request created for task ${taskId}`);
+      await logEvent('✓ Workflow complete — awaiting approval', 'success');
     } catch (approvalError: any) {
       // Critical rule: failure to create/send an approval request must not advance the workflow and must not flip the task to ERROR.
       // It should stay AWAITING_APPROVAL with an error note like approvalNotificationFailed: true.
       logger.warn(`Failed to create/send approval request for task ${taskId}: ${approvalError.message}`);
+      await logEvent(`Warning: Approval notification failed — ${approvalError.message}`, 'warning');
       await updateWorkflowState(clientFolder, runId, WorkflowState.AWAITING_APPROVAL, { 
         approvalNotificationFailed: true,
         approvalError: approvalError.message
@@ -699,6 +729,7 @@ async function _continueWorkflowAfterAgentInternal(
 
   } catch (error: any) {
     logger.error(`Error continuing workflow for task ${taskId} (runId: ${runId}): ${error.message}`);
+    await logEvent(`✗ Workflow error: ${error.message}`, 'error');
     await updateWorkflowState(clientFolder, runId, WorkflowState.ERROR, {
       error: error.message,
     });
@@ -1210,6 +1241,14 @@ export async function completeWorkflowAfterApproval(
 ): Promise<void> {
   logger.info(`Completing workflow for task ${taskId} after approval`);
 
+  // Import taskStatusManager for completion logging
+  const { taskStatusManager } = await import('../cursor/taskStatusManager');
+  const logEvent = async (message: string, type: string = 'workflow') => {
+    try {
+      await taskStatusManager.appendLog(taskId, { type, message, step: message }, clientFolder);
+    } catch (e) { /* best-effort */ }
+  };
+
   try {
     // Load task state
     const state = await loadTaskState(clientFolder, taskId);
@@ -1220,11 +1259,14 @@ export async function completeWorkflowAfterApproval(
     const branchName = state.branchName;
 
     // Step 1: Push branch to GitHub
+    await logEvent('Pushing branch to GitHub...', 'workflow');
     await updateWorkflowState(clientFolder, taskId, WorkflowState.COMPLETED, undefined, 'Pushing to GitHub');
     await pushBranch(clientFolder, branchName);
+    await logEvent(`✓ Branch ${branchName} pushed to GitHub`, 'success');
 
     // Step 2: Update state to completed
     await updateWorkflowState(clientFolder, taskId, WorkflowState.COMPLETED, undefined, 'Workflow completed');
+    await logEvent('✓ Workflow completed successfully', 'success');
 
     // Step 3: Update ClickUp task
     try {
