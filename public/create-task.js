@@ -78,7 +78,7 @@ async function loadModels() {
         if (!response.ok) throw new Error('Failed to load models');
         
         const data = await response.json();
-        models = data.models || [];
+        models = data.availableModels || [];
         
         const modelSelect = document.getElementById('modelSelect');
         
@@ -128,7 +128,7 @@ function setupEventListeners() {
     // Success action buttons
     viewTaskBtn.addEventListener('click', () => {
         if (createdTaskId) {
-            window.location.href = `/task.html?id=${encodeURIComponent(createdTaskId)}`;
+            window.location.href = `/task.html?taskId=${encodeURIComponent(createdTaskId)}`;
         }
     });
     
@@ -269,7 +269,7 @@ async function handleTriggerAgent() {
         
         // Redirect to task page
         setTimeout(() => {
-            window.location.href = `/task.html?id=${encodeURIComponent(createdTaskId)}`;
+            window.location.href = `/task.html?taskId=${encodeURIComponent(createdTaskId)}`;
         }, 1000);
         
     } catch (error) {
