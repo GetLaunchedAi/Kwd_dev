@@ -7,6 +7,7 @@
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { chromium, Browser, BrowserContext, Page, ElementHandle } from 'playwright';
 import { logger } from './logger';
 import { updateTaskState } from '../state/stateManager';
@@ -79,13 +80,13 @@ export interface ScreenshotOptions {
 // ============================================================================
 
 /** Wait timeout for images to load (ms) */
-const IMAGE_LOAD_TIMEOUT = 10000; // Increased from 5000 to 10000 for better reliability
+const IMAGE_LOAD_TIMEOUT = 10000;
 
 /** Minimum wait after scroll to let lazy images start loading (ms) */
-const POST_SCROLL_WAIT = 800; // Increased from 300 to 800 for lazy-load triggers
+const POST_SCROLL_WAIT = 1500;
 
 /** Wait after page load for initial render (ms) */
-const INITIAL_RENDER_WAIT = 1500; // Increased from 500 for complete initial render
+const INITIAL_RENDER_WAIT = 3000;
 
 const DEFAULT_OPTIONS: Required<ScreenshotOptions> = {
   maxPages: 20,
@@ -402,7 +403,26 @@ async function screenshotSectionsOnPage(
 
   try {
     await page.goto(url, { waitUntil: 'networkidle', timeout: options.timeout });
-    await page.waitForTimeout(INITIAL_RENDER_WAIT); // Let initial render and animations settle (Phase 2: increased from 500)
+    await page.waitForTimeout(INITIAL_RENDER_WAIT);
+    
+    // Wait for fonts to be fully loaded
+    await page.evaluate(() => document.fonts.ready).catch(() => {});
+    
+    // Pre-scroll through the entire page to trigger ALL lazy-loaded content at once
+    await page.evaluate(async () => {
+      const totalHeight = document.body.scrollHeight;
+      const step = window.innerHeight;
+      for (let y = 0; y < totalHeight; y += step) {
+        window.scrollTo(0, y);
+        await new Promise(r => setTimeout(r, 150));
+      }
+      // Scroll back to top
+      window.scrollTo(0, 0);
+    }).catch(() => {});
+    
+    // Wait for lazy-loaded content triggered by scrolling to finish loading
+    await page.waitForTimeout(2000);
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
     
     // Wait for all images to fully load before capturing
     await waitForImagesToLoad(page);
@@ -837,4 +857,109 @@ export async function getAllScreenshotManifests(taskId: string): Promise<{
   }
 
   return result;
+}
+
+// ============================================================================
+// Before/After Comparison & Filtering
+// ============================================================================
+
+/**
+ * Computes SHA-256 hash of a file.
+ */
+async function hashFile(filePath: string): Promise<string | null> {
+  try {
+    const data = await fs.readFile(filePath);
+    return crypto.createHash('sha256').update(data).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compares after screenshots against before screenshots and removes pages
+ * whose full-page screenshot is identical (unchanged).
+ * Returns the list of page slugs that actually changed.
+ *
+ * This prevents showing screenshots for pages where no visual change occurred.
+ */
+export async function filterUnchangedPages(
+  taskId: string,
+  beforeIteration: number,
+  afterIteration: number
+): Promise<{ changedSlugs: string[]; removedCount: number }> {
+  const screenshotsBaseDir = path.join(process.cwd(), 'public', 'screenshots', taskId);
+  const beforeDir = path.join(screenshotsBaseDir, `before_${beforeIteration}`);
+  const afterDir = path.join(screenshotsBaseDir, `after_${afterIteration}`);
+
+  if (!(await fs.pathExists(beforeDir)) || !(await fs.pathExists(afterDir))) {
+    logger.debug(`Cannot filter unchanged pages: before or after directory missing for task ${taskId}`);
+    return { changedSlugs: [], removedCount: 0 };
+  }
+
+  // Load after manifest
+  const afterManifestPath = path.join(afterDir, 'manifest.json');
+  if (!(await fs.pathExists(afterManifestPath))) {
+    return { changedSlugs: [], removedCount: 0 };
+  }
+
+  const afterManifest: ScreenshotManifest = await fs.readJson(afterManifestPath);
+  const changedSlugs: string[] = [];
+  const unchangedSlugs: string[] = [];
+
+  for (const page of afterManifest.pages) {
+    if (page.error || !page.fullPage) {
+      // Keep pages with errors (they might indicate a real problem)
+      changedSlugs.push(page.pageSlug);
+      continue;
+    }
+
+    const afterFullPage = path.join(process.cwd(), 'public', page.fullPage);
+    const beforeFullPage = path.join(beforeDir, page.pageSlug, '__fullpage.png');
+
+    if (!(await fs.pathExists(beforeFullPage))) {
+      // New page not in before set — definitely changed
+      changedSlugs.push(page.pageSlug);
+      continue;
+    }
+
+    const beforeHash = await hashFile(beforeFullPage);
+    const afterHash = await hashFile(afterFullPage);
+
+    if (beforeHash && afterHash && beforeHash === afterHash) {
+      unchangedSlugs.push(page.pageSlug);
+    } else {
+      changedSlugs.push(page.pageSlug);
+    }
+  }
+
+  // If ALL pages are unchanged, keep at least the home page for reference
+  if (changedSlugs.length === 0 && unchangedSlugs.length > 0) {
+    const homeSlug = unchangedSlugs.find(s => s === 'home') || unchangedSlugs[0];
+    changedSlugs.push(homeSlug);
+    const idx = unchangedSlugs.indexOf(homeSlug);
+    if (idx >= 0) unchangedSlugs.splice(idx, 1);
+  }
+
+  // Remove unchanged page directories from the after set and update manifest
+  for (const slug of unchangedSlugs) {
+    const pageDir = path.join(afterDir, slug);
+    try {
+      await fs.remove(pageDir);
+    } catch (err: any) {
+      logger.debug(`Could not remove unchanged page dir ${slug}: ${err.message}`);
+    }
+  }
+
+  // Update after manifest to only include changed pages
+  afterManifest.pages = afterManifest.pages.filter(p => changedSlugs.includes(p.pageSlug));
+  afterManifest.totalPages = afterManifest.pages.length;
+  afterManifest.totalSections = afterManifest.pages.reduce((sum, p) => sum + p.sectionCount, 0);
+
+  await fs.writeJson(afterManifestPath, afterManifest, { spaces: 2 });
+
+  if (unchangedSlugs.length > 0) {
+    logger.info(`Screenshot filter: ${changedSlugs.length} changed, ${unchangedSlugs.length} unchanged pages removed for task ${taskId}`);
+  }
+
+  return { changedSlugs, removedCount: unchangedSlugs.length };
 }

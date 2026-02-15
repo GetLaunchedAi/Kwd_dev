@@ -92,7 +92,7 @@ export async function processTask(task: ClickUpTask): Promise<void> {
     try {
       logger.info(`Taking initial screenshots for task ${taskId}`);
       await updateWorkflowState(clientFolder, taskId, WorkflowState.PENDING, undefined, 'Taking initial screenshots');
-      const url = await visualTester.startApp(clientFolder);
+      const url = await visualTester.startApp(clientFolder, true); // forceLocal: build from current source
       appStarted = true;
       
       // Wait for app to fully initialize (warmup delay)
@@ -391,7 +391,7 @@ async function _continueWorkflowAfterAgentInternal(
   try {
     // Take "after" screenshots for this step
     logger.info(`Taking artifacts for task ${taskId} (Iteration ${iteration}, runId ${runId})`);
-    const url = await visualTester.startApp(clientFolder);
+    const url = await visualTester.startApp(clientFolder, true); // forceLocal: build from modified source
     appStartedForAfter = true;
     
     // Wait for app to fully initialize (warmup delay) - Phase 2 enhancement
@@ -458,6 +458,19 @@ async function _continueWorkflowAfterAgentInternal(
     // ISSUE 2 FIX: Log clear warning if screenshots failed but workflow continues
     if (!screenshotCaptureSuccess) {
       logger.warn(`Screenshot capture FAILED for task ${taskId}. Error: ${screenshotError || 'Unable to capture any screenshots'}. Workflow will continue without screenshots.`);
+    }
+    
+    // Filter out pages with no visual changes by comparing before/after hashes
+    if (screenshotCaptureSuccess && screenshotResult?.success) {
+      try {
+        const { filterUnchangedPages } = await import('../utils/screenshotService');
+        const filterResult = await filterUnchangedPages(taskId, 0, iteration);
+        if (filterResult.removedCount > 0) {
+          logger.info(`Removed ${filterResult.removedCount} unchanged page(s) from after screenshots for task ${taskId}`);
+        }
+      } catch (filterErr: any) {
+        logger.debug(`Could not filter unchanged pages: ${filterErr.message}`);
+      }
     }
   } catch (artifactError: any) {
     screenshotError = artifactError.message;

@@ -3519,7 +3519,7 @@ app.post('/api/tasks/:taskId/reject', async (req: Request, res: Response) => {
 app.post('/api/tasks/:taskId/feedback', async (req: Request, res: Response) => {
   try {
     const { taskId } = req.params;
-    const { feedback, applyOnNextRun = true, triggerRerun = false } = req.body;
+    const { feedback } = req.body;
 
     // Validate feedback
     if (!feedback || typeof feedback !== 'string' || feedback.trim().length < 3) {
@@ -3537,59 +3537,56 @@ app.post('/api/tasks/:taskId/feedback', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Save the feedback to task state
+    // Save the feedback to task state (always apply on next run)
     const { saveAgentFeedback, WorkflowState } = await import('./state/stateManager');
-    const updatedState = await saveAgentFeedback(clientFolder, taskId, trimmedFeedback, applyOnNextRun);
+    const updatedState = await saveAgentFeedback(clientFolder, taskId, trimmedFeedback, true);
 
-    // If user wants to trigger a rerun with the feedback
-    if (triggerRerun) {
-      // Check if task is currently running
-      const { taskCleanupService } = await import('./cursor/taskCleanupService');
-      const isRunning = await taskCleanupService.isTaskRunning(taskId, clientFolder);
+    // Always trigger a rerun when feedback is submitted
+    // Check if task is currently running
+    const { taskCleanupService } = await import('./cursor/taskCleanupService');
+    const isRunning = await taskCleanupService.isTaskRunning(taskId, clientFolder);
 
-      if (isRunning) {
-        return res.json({ 
-          success: true, 
-          message: 'Feedback saved. Cannot trigger rerun while agent is running.',
-          feedbackSaved: true,
-          rerunTriggered: false,
-          taskId,
-          feedbackCount: updatedState.agentFeedback?.length || 0
-        });
-      }
-
-      // Check if we're in a state where rerun makes sense
-      const rerunnableStates = [
-        WorkflowState.PENDING,
-        WorkflowState.COMPLETED,
-        WorkflowState.REJECTED,
-        WorkflowState.AWAITING_APPROVAL,
-        WorkflowState.ERROR
-      ];
-
-      if (rerunnableStates.includes(taskState.state as WorkflowState)) {
-        // Trigger rerun with feedback
-        const { handleTaskRejectionWithFeedback } = await import('./workflow/workflowOrchestrator');
-        handleTaskRejectionWithFeedback(clientFolder, taskId, trimmedFeedback).catch(err => {
-          logger.error(`Async feedback rerun error for ${taskId}: ${err.message}`);
-        });
-
-        return res.json({ 
-          success: true, 
-          message: 'Feedback saved and agent rerun triggered.',
-          feedbackSaved: true,
-          rerunTriggered: true,
-          taskId,
-          feedbackCount: updatedState.agentFeedback?.length || 0
-        });
-      }
+    if (isRunning) {
+      return res.json({ 
+        success: true, 
+        message: 'Feedback saved. Cannot trigger rerun while agent is running.',
+        feedbackSaved: true,
+        rerunTriggered: false,
+        taskId,
+        feedbackCount: updatedState.agentFeedback?.length || 0
+      });
     }
 
+    // Check if we're in a state where rerun makes sense
+    const rerunnableStates = [
+      WorkflowState.PENDING,
+      WorkflowState.COMPLETED,
+      WorkflowState.REJECTED,
+      WorkflowState.AWAITING_APPROVAL,
+      WorkflowState.ERROR
+    ];
+
+    if (rerunnableStates.includes(taskState.state as WorkflowState)) {
+      // Trigger rerun with feedback
+      const { handleTaskRejectionWithFeedback } = await import('./workflow/workflowOrchestrator');
+      handleTaskRejectionWithFeedback(clientFolder, taskId, trimmedFeedback).catch(err => {
+        logger.error(`Async feedback rerun error for ${taskId}: ${err.message}`);
+      });
+
+      return res.json({ 
+        success: true, 
+        message: 'Feedback saved and agent rerun triggered.',
+        feedbackSaved: true,
+        rerunTriggered: true,
+        taskId,
+        feedbackCount: updatedState.agentFeedback?.length || 0
+      });
+    }
+
+    // Task is in a non-rerunnable state (e.g., IN_PROGRESS but not detected as running)
     res.json({ 
       success: true, 
-      message: applyOnNextRun 
-        ? 'Feedback saved and will be applied on next agent run.'
-        : 'Feedback saved for reference.',
+      message: 'Feedback saved and will be applied on next run.',
       feedbackSaved: true,
       rerunTriggered: false,
       taskId,
@@ -4081,8 +4078,8 @@ app.post('/api/tasks/:taskId/retry-screenshots', async (req: Request, res: Respo
           screenshotError: undefined
         });
         
-        // Start app and capture screenshots
-        const url = await visualTester.startApp(clientFolder);
+        // Start app and capture screenshots (forceLocal to build from current source)
+        const url = await visualTester.startApp(clientFolder, true);
         appStarted = true;
         
         // Warmup

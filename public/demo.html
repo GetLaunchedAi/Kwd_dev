@@ -496,18 +496,8 @@
                                     <button id="toggleFeedbackHistoryBtn" class="btn btn-secondary btn-sm">History</button>
                                 </div>
                                 <div class="feedback-content p-md">
-                                    <p class="feedback-hint mb-md">Send feedback to guide the agent. This will be applied on the next step or rerun.</p>
+                                    <p class="feedback-hint mb-md">Send feedback to the agent. This will trigger a rerun with your feedback applied.</p>
                                     <textarea id="agentFeedbackInput" class="feedback-textarea" placeholder="Enter your feedback for the agent..." rows="4"></textarea>
-                                    <div class="feedback-options mt-sm">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="applyOnNextRunCheckbox" checked>
-                                            <span>Apply on next run</span>
-                                        </label>
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="triggerRerunCheckbox">
-                                            <span>Trigger rerun immediately</span>
-                                        </label>
-                                    </div>
                                     <div class="feedback-actions mt-md">
                                         <button id="submitAgentFeedbackBtn" class="btn btn-primary w-full" disabled>
                                             <i data-lucide="send"></i> Submit Feedback

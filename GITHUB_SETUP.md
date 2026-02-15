@@ -79,3 +79,4 @@ If you need to **generate a new key**:
 - **Authentication Failed:**
   - Check if `CLOUDWAYS_USER` is actually the SSH username (`master_...`) and not an email.
   - Ensure the Public Key was correctly added to Cloudways.
+

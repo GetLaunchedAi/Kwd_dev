@@ -99,12 +99,15 @@ export class VisualTester {
   /**
    * Starts the client application for a specific folder
    * In production (Cloudways), uses the production domain URL instead of starting a preview server
+   * @param folderPath - Path to the client project folder
+   * @param forceLocal - When true, always start a local dev server (used for screenshots to capture local changes)
    */
-  async startApp(folderPath: string): Promise<string> {
+  async startApp(folderPath: string, forceLocal: boolean = false): Promise<string> {
     // In production, use static URL instead of starting a preview server
+    // UNLESS forceLocal is true (needed for accurate before/after screenshot comparison)
     const isProduction = process.env.NODE_ENV === 'production';
     
-    if (isProduction) {
+    if (isProduction && !forceLocal) {
       const slug = path.basename(folderPath);
       
       // Check for custom domain in client.json
@@ -131,7 +134,7 @@ export class VisualTester {
       return cloudwaysUrl;
     }
     
-    // Development mode: start local preview server
+    // Local mode: start local preview server
     // Check if already running
     const existing = this.instances.get(folderPath);
     if (existing) {

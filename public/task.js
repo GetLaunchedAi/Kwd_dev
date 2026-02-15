@@ -1913,8 +1913,6 @@ function setupAgentFeedbackHandlers() {
     const feedbackInput = document.getElementById('agentFeedbackInput');
     const submitBtn = document.getElementById('submitFeedbackBtn');
     const historyBtn = document.getElementById('toggleFeedbackHistoryBtn');
-    const applyCheckbox = document.getElementById('applyOnNextRunCheckbox');
-    const rerunCheckbox = document.getElementById('triggerRerunCheckbox');
     
     // Enable/disable submit button based on input
     feedbackInput?.addEventListener('input', () => {
@@ -1928,13 +1926,6 @@ function setupAgentFeedbackHandlers() {
     
     // Toggle history visibility
     historyBtn?.addEventListener('click', toggleFeedbackHistory);
-    
-    // When "trigger rerun" is checked, ensure "apply on next run" is also checked
-    rerunCheckbox?.addEventListener('change', () => {
-        if (rerunCheckbox.checked && applyCheckbox) {
-            applyCheckbox.checked = true;
-        }
-    });
     
     // Allow Ctrl+Enter to submit
     feedbackInput?.addEventListener('keydown', (e) => {
@@ -1950,8 +1941,6 @@ function setupAgentFeedbackHandlers() {
 async function handleSubmitFeedback() {
     const feedbackInput = document.getElementById('agentFeedbackInput');
     const submitBtn = document.getElementById('submitFeedbackBtn');
-    const applyCheckbox = document.getElementById('applyOnNextRunCheckbox');
-    const rerunCheckbox = document.getElementById('triggerRerunCheckbox');
     
     const feedback = feedbackInput?.value?.trim();
     
@@ -1960,8 +1949,9 @@ async function handleSubmitFeedback() {
         return;
     }
     
-    const applyOnNextRun = applyCheckbox?.checked ?? true;
-    const triggerRerun = rerunCheckbox?.checked ?? false;
+    // Always apply feedback and trigger a rerun
+    const applyOnNextRun = true;
+    const triggerRerun = true;
     
     // Disable button during submission
     if (submitBtn) {
@@ -1979,29 +1969,20 @@ async function handleSubmitFeedback() {
         
         if (response.success) {
             // Show success message based on what happened
-            if (response.rerunTriggered) {
-                notifications.success('Feedback sent! Agent rerun triggered.');
-            } else if (applyOnNextRun) {
-                notifications.success('Feedback saved and will be applied on next agent run.');
-            } else {
-                notifications.success('Feedback saved for reference.');
-            }
+            notifications.success(response.rerunTriggered 
+                ? 'Feedback sent! Agent rerun triggered.' 
+                : 'Feedback saved and will be applied on next run.');
             
             // Clear input
             if (feedbackInput) feedbackInput.value = '';
             
-            // Reset rerun checkbox
-            if (rerunCheckbox) rerunCheckbox.checked = false;
-            
             // Refresh feedback history
             await loadFeedbackHistory();
             
-            // If rerun was triggered, start polling for updates
-            if (response.rerunTriggered) {
-                loadTaskDetails({ silent: true });
-                if (!autoRefreshInterval) {
-                    startAutoRefresh();
-                }
+            // Start polling for updates since rerun is always triggered
+            loadTaskDetails({ silent: true });
+            if (!autoRefreshInterval) {
+                startAutoRefresh();
             }
         } else {
             notifications.error(response.error || 'Failed to send feedback');

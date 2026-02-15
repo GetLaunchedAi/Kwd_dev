@@ -152,3 +152,4 @@ if (!areGitSettingsConfigured()) {
 4. **Comprehensive Checks**: Validates both folder state and configuration settings
 5. **User-Friendly**: Errors displayed in the workflow progress error node guide users to fix issues
 
+
