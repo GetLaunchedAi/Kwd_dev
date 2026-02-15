@@ -35,8 +35,12 @@ jobs:
             # Load nvm and switch to a compatible Node version (>=20.19.0)
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-            nvm install 20 2>/dev/null || true
-            nvm use 20
+            # Clear npm prefix that conflicts with nvm on Cloudways
+            nvm_prefix=$(npm config get prefix 2>/dev/null || true)
+            npm config delete prefix 2>/dev/null || true
+            npm config delete globalconfig 2>/dev/null || true
+            nvm install 20
+            nvm use --delete-prefix v20 2>/dev/null || nvm use 20
             echo "Using Node $(node -v) / npm $(npm -v)"
 
             # Configure git pull strategy if not set
