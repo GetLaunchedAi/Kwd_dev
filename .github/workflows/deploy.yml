@@ -34,6 +34,9 @@ jobs:
             
             cd $APP_DIR
             
+            # Configure git pull strategy if not set
+            git config pull.rebase false 2>/dev/null || true
+            
             # Pull latest changes
             # This will NOT overwrite .env files as they are ignored in .gitignore
             git pull origin main
@@ -48,7 +51,8 @@ jobs:
             npm run build
             npm prune --production
             
-            # Restart the application using PM2
-            pm2 restart kwd-cursor-tool || pm2 start ecosystem.config.js
+            # Restart the application using PM2 (use npx since pm2 not in PATH)
+            npx pm2 restart kwd-cursor-tool || npx pm2 start ecosystem.config.js
             
             echo "Deployment complete!"
+
