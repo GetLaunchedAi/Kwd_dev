@@ -226,7 +226,7 @@ function renderScreenshots() {
     
     if (!galleryContainer) return;
     
-    // Initialize gallery if not already done
+    // Initialize gallery if not already done (createScreenshotGallery auto-destroys prior instance)
     if (!demoGallery) {
         demoGallery = createScreenshotGallery('demoScreenshotGallery', {
             showPageTabs: true,
@@ -235,6 +235,7 @@ function renderScreenshots() {
             enableLightbox: true,
             comparisonMode: 'side-by-side'
         });
+        screenshotRefreshBtnInitialized = false; // Allow refresh button rebind
     }
     
     // Load screenshots for the demo task

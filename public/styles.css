@@ -6152,6 +6152,13 @@ input[type="color"]::-webkit-color-swatch {
     box-shadow: var(--shadow-sm);
 }
 
+.view-btn.disabled,
+.view-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 /* Gallery Content */
 .gallery-content {
     display: flex;

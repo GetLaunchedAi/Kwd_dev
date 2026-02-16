@@ -875,6 +875,15 @@ let screenshotRefreshBtnInitialized = false;
 let screenshotPollingTimer = null; // Prevent multiple polling loops
 let isRenderingScreenshots = false; // Prevent concurrent renders
 
+/** Destroys the gallery instance so the container can be safely re-used */
+function destroyGallery() {
+    if (gallery) {
+        gallery.destroy();
+        gallery = null;
+    }
+    screenshotRefreshBtnInitialized = false;
+}
+
 // Helper function to escape HTML to prevent XSS
 function escapeHtml(text) {
     if (!text) return '';
@@ -932,6 +941,9 @@ async function renderScreenshots() {
     const status = await checkScreenshotStatus(screenshotTaskId);
     
     if (status.capturing) {
+        // Destroy gallery so it will be freshly created once capture finishes
+        destroyGallery();
+
         // Show progress indicator instead of empty gallery
         const safePhase = escapeHtml(status.phase || 'screenshots');
         const safeProgress = Math.min(100, Math.max(0, status.progress || 0)); // Clamp 0-100
@@ -969,6 +981,9 @@ async function renderScreenshots() {
     
     // Check if screenshots failed and show error message
     if (taskData?.taskState?.screenshotCaptureSuccess === false) {
+        // Destroy gallery so it will be freshly created if user retries
+        destroyGallery();
+
         const retryBtn = document.getElementById('retryScreenshotsBtn');
         if (retryBtn) {
             retryBtn.classList.remove('hidden');
