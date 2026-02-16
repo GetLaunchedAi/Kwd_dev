@@ -4,7 +4,7 @@ import * as crypto from 'crypto';
 import { config } from '../config/config';
 import { logger } from './logger';
 
-const SESSION_FILE = path.join(process.cwd(), 'tokens', 'sessions.json');
+const SESSION_FILE = path.join(process.cwd(), 'state', 'sessions.json');
 
 interface Session {
   token: string;
