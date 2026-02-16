@@ -515,23 +515,34 @@ class ScreenshotGallery {
 
     const page = manifest.pages?.find(p => p.pageSlug === this.currentPage);
     if (!page?.sections?.length) {
-      sectionsEl.innerHTML = '<p class="no-sections">No section screenshots for this page</p>';
+      sectionsEl.innerHTML = '';
       return;
     }
 
     const sections = page.sections.map(s => ({ ...s, path: this._normalizePath(s.path) }));
+    const sectionLabel = this.currentView === 'before' ? 'Before' : 'After';
     sectionsEl.innerHTML = `
-      <h4 class="sections-title">Page Sections (${sections.length})</h4>
+      <div class="sections-header">
+        <h4 class="sections-title">
+          <span>Sections</span>
+          <span class="sections-count">${sections.length}</span>
+        </h4>
+      </div>
       <div class="sections-grid">
-        ${sections.map(s => `
-          <div class="section-thumbnail" onclick="screenshotGallery?.openLightbox('/${s.path}', '${this._escapeHtml(s.name)}')">
+        ${sections.map(s => {
+          const label = s.name || s.id || s.tag || 'Section';
+          return `
+          <div class="section-thumbnail" onclick="screenshotGallery?.openLightbox('/${s.path}', '${this._escapeHtml(label)}')">
             <img src="/${s.path}" 
-                 alt="${this._escapeHtml(s.tag)}"
+                 alt="${this._escapeHtml(label)}"
                  loading="lazy"
                  onerror="this.parentElement.classList.add('error')">
-            <span class="section-info">${s.tag}${s.id ? '#' + s.id : ''}</span>
-          </div>
-        `).join('')}
+            <div class="section-label">
+              <span class="section-name">${this._escapeHtml(label)}</span>
+              <span class="section-tag">&lt;${s.tag}&gt;</span>
+            </div>
+          </div>`;
+        }).join('')}
       </div>
     `;
   }

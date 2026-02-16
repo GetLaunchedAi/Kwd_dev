@@ -480,31 +480,6 @@
                                 </div>
                             </section>
 
-                            <!-- Agent Feedback Card -->
-                            <section id="agentFeedbackSection" class="card feedback-card">
-                                <div class="card-header flex-between">
-                                    <h3><i data-lucide="message-circle"></i> Agent Feedback</h3>
-                                    <button id="toggleFeedbackHistoryBtn" class="btn btn-secondary btn-sm">History</button>
-                                </div>
-                                <div class="feedback-content p-md">
-                                    <p class="feedback-hint mb-md">Send feedback to the agent. This will trigger a rerun with your feedback applied.</p>
-                                    <textarea id="agentFeedbackInput" class="feedback-textarea" placeholder="Enter your feedback for the agent..." rows="4"></textarea>
-                                    <div class="feedback-actions mt-md">
-                                        <button id="submitFeedbackBtn" class="btn btn-primary w-full" disabled>
-                                            <i data-lucide="send"></i> Submit Feedback
-                                        </button>
-                                    </div>
-                                </div>
-                                <div id="feedbackHistoryContainer" class="feedback-history collapsed">
-                                    <div class="feedback-history-header">
-                                        <h4>Feedback History</h4>
-                                        <span id="feedbackHistoryCount" class="badge">0</span>
-                                    </div>
-                                    <div id="feedbackHistoryList" class="feedback-history-list">
-                                        <p class="no-feedback">No feedback submitted yet</p>
-                                    </div>
-                                </div>
-                            </section>
                         </div>
                     </div>
                 </div>
@@ -534,16 +509,19 @@
     <div id="rejectModal" class="modal-overlay hidden">
         <div class="modal">
             <div class="modal-header">
-                <h3 class="modal-title">Reject Changes</h3>
+                <h3 class="modal-title"><i data-lucide="message-square"></i> Reject with Feedback</h3>
                 <button class="modal-close" id="closeRejectModal">&times;</button>
             </div>
             <div class="modal-body">
-                <p>Please provide a reason for rejecting these changes (optional):</p>
-                <textarea id="rejectReason" class="modal-textarea" placeholder="Reason for rejection..."></textarea>
+                <p class="reject-hint">Describe what needs to change. The agent will rerun with your feedback applied.</p>
+                <textarea id="rejectReason" class="reject-feedback-textarea" placeholder="e.g. The header font should be larger, and the CTA button color should match the brand guidelines..." rows="6"></textarea>
+                <small id="rejectCharCount" class="reject-char-count">Minimum 3 characters</small>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="cancelRejectBtn">Cancel</button>
-                <button class="btn btn-danger" id="confirmRejectBtn">Reject</button>
+                <button class="btn btn-danger" id="confirmRejectBtn" disabled>
+                    <i data-lucide="rotate-ccw"></i> Reject &amp; Rerun Agent
+                </button>
             </div>
         </div>
     </div>

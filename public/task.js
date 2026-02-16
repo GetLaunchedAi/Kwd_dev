@@ -199,6 +199,23 @@ document.addEventListener('DOMContentLoaded', () => {
         closeModal('rejectModal');
     });
     
+    // Reject textarea validation – enable/disable the Reject button and show char count
+    const rejectTextarea = document.getElementById('rejectReason');
+    const confirmRejectBtn = document.getElementById('confirmRejectBtn');
+    const rejectCharCount = document.getElementById('rejectCharCount');
+    if (rejectTextarea && confirmRejectBtn) {
+        rejectTextarea.addEventListener('input', () => {
+            const len = rejectTextarea.value.trim().length;
+            confirmRejectBtn.disabled = len < 3;
+            if (rejectCharCount) {
+                rejectCharCount.textContent = len < 3 
+                    ? `${3 - len} more character${3 - len !== 1 ? 's' : ''} needed`
+                    : `${len} characters`;
+                rejectCharCount.classList.toggle('valid', len >= 3);
+            }
+        });
+    }
+    
     // Diff controls
     document.getElementById('expandAllBtn')?.addEventListener('click', () => expandCollapseAll(true));
     document.getElementById('collapseAllBtn')?.addEventListener('click', () => expandCollapseAll(false));
@@ -234,9 +251,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
-
-    // Agent Feedback handlers
-    setupAgentFeedbackHandlers();
 
     // Agent Logs controls
     setupLogsControls();
@@ -840,9 +854,6 @@ function renderTaskDetails() {
         stopAutoRefresh();
     }
 
-    // Update feedback section based on current state
-    updateFeedbackSectionState();
-
     // Re-initialize icons
     if (window.lucide) lucide.createIcons();
 }
@@ -1392,27 +1403,16 @@ window.closeModal = closeModal;
 async function handleApprove() {
     closeModal('approveModal');
     
-    const approvalToken = taskData?.taskState?.metadata?.approvalToken;
-    if (!approvalToken) {
-        notifications.error('No approval token found. The task may not be in awaiting approval state.');
-        return;
-    }
-    
     try {
-        const response = await fetch(`/approve/${approvalToken}`, {
-            method: 'GET'
-        });
+        const response = await api.post(`/tasks/${taskId}/approve`, {});
         
-        if (response.ok) {
-            notifications.success('Changes approved successfully!');
+        if (response.success) {
+            notifications.success(response.message || 'Changes approved successfully!');
             
             // Update local state immediately for responsive UI
             if (taskData?.taskState) {
                 taskData.taskState.state = 'approved';
                 taskData.taskState.updatedAt = new Date().toISOString();
-                if (taskData.taskState.metadata) {
-                    delete taskData.taskState.metadata.approvalToken;
-                }
                 renderTaskDetails();
                 renderTimeline();
             }
@@ -1423,57 +1423,59 @@ async function handleApprove() {
                 loadDiff({ silent: true });
             }, 2000);
         } else {
-            const text = await response.text();
-            notifications.error(`Failed to approve: ${text}`);
+            notifications.error(response.error || 'Failed to approve changes');
         }
     } catch (err) {
-        notifications.error(`Error approving changes: ${err.message}`);
+        const msg = err.data?.error || err.message || 'Error approving changes';
+        notifications.error(msg);
         console.error('Error approving:', err);
     }
 }
 
 async function handleReject() {
-    const reason = document.getElementById('rejectReason').value.trim();
+    const reason = document.getElementById('rejectReason')?.value?.trim();
     closeModal('rejectModal');
     
-    const approvalToken = taskData?.taskState?.metadata?.approvalToken;
-    if (!approvalToken) {
-        notifications.error('No approval token found. The task may not be in awaiting approval state.');
+    if (!reason || reason.length < 3) {
+        notifications.warning('Please provide feedback (at least 3 characters) before rejecting.');
         return;
     }
     
     try {
-        const url = `/reject/${approvalToken}${reason ? `?reason=${encodeURIComponent(reason)}` : ''}`;
-        const response = await fetch(url, {
-            method: 'GET'
-        });
+        const response = await api.post(`/tasks/${taskId}/reject`, { feedback: reason });
         
-        if (response.ok) {
-            notifications.success('Changes rejected successfully!');
+        if (response.success) {
+            notifications.success(response.message || 'Changes rejected. Agent rerun triggered with your feedback.');
             
             // Update local state immediately for responsive UI
             if (taskData?.taskState) {
                 taskData.taskState.state = 'rejected';
                 taskData.taskState.updatedAt = new Date().toISOString();
-                if (reason) taskData.taskState.error = `Rejected: ${reason}`;
-                if (taskData.taskState.metadata) {
-                    delete taskData.taskState.metadata.approvalToken;
-                }
+                taskData.taskState.error = `Rejected: ${reason}`;
                 renderTaskDetails();
                 renderTimeline();
             }
+            
+            // Clear the reject reason textarea
+            const textarea = document.getElementById('rejectReason');
+            if (textarea) textarea.value = '';
             
             // Fetch actual server state after a brief delay
             setTimeout(() => {
                 loadTaskDetails({ silent: true });
                 loadDiff({ silent: true });
             }, 2000);
+            
+            // Start auto-refresh since agent is being rerun
+            if (!autoRefreshInterval) {
+                startAutoRefresh();
+            }
         } else {
-            const text = await response.text();
-            notifications.error(`Failed to reject: ${text}`);
+            notifications.error(response.error || 'Failed to reject changes');
         }
     } catch (err) {
-        notifications.error(`Error rejecting changes: ${err.message}`);
+        const msg = err.data?.error || err.message || 'Error rejecting changes';
+        notifications.error(msg);
         console.error('Error rejecting:', err);
     }
 }
@@ -1930,244 +1932,8 @@ function updateConnectionStatus(status, user) {
 });
 
 // ============================================
-// Agent Feedback Functions
+// (Agent Feedback section removed – rejection feedback is handled via the reject modal)
 // ============================================
-
-let feedbackHistoryVisible = false;
-let feedbackHandlersInitialized = false;
-
-/**
- * Sets up all event handlers for the agent feedback section.
- * Guards against duplicate registration.
- */
-function setupAgentFeedbackHandlers() {
-    // Prevent duplicate event handler registration
-    if (feedbackHandlersInitialized) return;
-    feedbackHandlersInitialized = true;
-
-    const feedbackInput = document.getElementById('agentFeedbackInput');
-    const submitBtn = document.getElementById('submitFeedbackBtn');
-    const historyBtn = document.getElementById('toggleFeedbackHistoryBtn');
-    
-    // Enable/disable submit button based on input
-    feedbackInput?.addEventListener('input', () => {
-        if (submitBtn) {
-            submitBtn.disabled = feedbackInput.value.trim().length < 3;
-        }
-    });
-    
-    // Submit feedback button
-    submitBtn?.addEventListener('click', handleSubmitFeedback);
-    
-    // Toggle history visibility
-    historyBtn?.addEventListener('click', toggleFeedbackHistory);
-    
-    // Allow Ctrl+Enter to submit
-    feedbackInput?.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.key === 'Enter' && !submitBtn?.disabled) {
-            handleSubmitFeedback();
-        }
-    });
-}
-
-/**
- * Handles submitting feedback to the agent
- */
-async function handleSubmitFeedback() {
-    const feedbackInput = document.getElementById('agentFeedbackInput');
-    const submitBtn = document.getElementById('submitFeedbackBtn');
-    
-    const feedback = feedbackInput?.value?.trim();
-    
-    if (!feedback || feedback.length < 3) {
-        notifications.warning('Please enter at least 3 characters of feedback');
-        return;
-    }
-    
-    // Always apply feedback and trigger a rerun
-    const applyOnNextRun = true;
-    const triggerRerun = true;
-    
-    // Disable button during submission
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Sending...';
-        if (window.lucide) lucide.createIcons();
-    }
-    
-    try {
-        const response = await api.post(`/tasks/${taskId}/feedback`, {
-            feedback,
-            applyOnNextRun,
-            triggerRerun
-        });
-        
-        if (response.success) {
-            // Show success message based on what happened
-            notifications.success(response.rerunTriggered 
-                ? 'Feedback sent! Agent rerun triggered.' 
-                : 'Feedback saved and will be applied on next run.');
-            
-            // Clear input
-            if (feedbackInput) feedbackInput.value = '';
-            
-            // Refresh feedback history
-            await loadFeedbackHistory();
-            
-            // Start polling for updates since rerun is always triggered
-            loadTaskDetails({ silent: true });
-            if (!autoRefreshInterval) {
-                startAutoRefresh();
-            }
-        } else {
-            notifications.error(response.error || 'Failed to send feedback');
-        }
-    } catch (err) {
-        notifications.error(`Error sending feedback: ${err.message}`);
-        console.error('Feedback error:', err);
-    } finally {
-        if (submitBtn) {
-            submitBtn.disabled = feedbackInput?.value?.trim()?.length < 3;
-            submitBtn.innerHTML = '<i data-lucide="send"></i> Submit Feedback';
-            if (window.lucide) lucide.createIcons();
-        }
-    }
-}
-
-/**
- * Toggles the visibility of feedback history
- */
-function toggleFeedbackHistory() {
-    const container = document.getElementById('feedbackHistoryContainer');
-    const btn = document.getElementById('toggleFeedbackHistoryBtn');
-    
-    feedbackHistoryVisible = !feedbackHistoryVisible;
-    
-    if (feedbackHistoryVisible) {
-        container?.classList.remove('collapsed');
-        if (btn) btn.textContent = 'Hide';
-        loadFeedbackHistory();
-    } else {
-        container?.classList.add('collapsed');
-        if (btn) btn.textContent = 'History';
-    }
-}
-
-/**
- * Loads and renders the feedback history
- */
-async function loadFeedbackHistory() {
-    const listContainer = document.getElementById('feedbackHistoryList');
-    const countBadge = document.getElementById('feedbackHistoryCount');
-    
-    if (!listContainer) return;
-    
-    try {
-        const response = await api.get(`/tasks/${taskId}/feedback`);
-        
-        if (!response.success) {
-            listContainer.innerHTML = '<p class="error-text">Failed to load feedback history</p>';
-            return;
-        }
-        
-        const feedback = response.feedback || [];
-        
-        // Update count badge
-        if (countBadge) {
-            countBadge.textContent = feedback.length;
-            countBadge.className = `badge ${response.pendingCount > 0 ? 'badge-warning' : ''}`;
-        }
-        
-        if (feedback.length === 0) {
-            listContainer.innerHTML = '<p class="no-feedback">No feedback submitted yet</p>';
-            return;
-        }
-        
-        // Sort by timestamp (newest first)
-        const sorted = [...feedback].sort((a, b) => 
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
-        
-        listContainer.innerHTML = sorted.map(fb => {
-            const date = new Date(fb.timestamp);
-            const timeAgo = FormattingUtils.formatRelativeTime(fb.timestamp);
-            const statusClass = fb.applied ? 'applied' : (fb.applyOnNextRun ? 'pending' : 'reference');
-            const statusText = fb.applied ? 'Applied' : (fb.applyOnNextRun ? 'Pending' : 'Reference');
-            const stateText = fb.state ? FormattingUtils.formatState(fb.state) : '';
-            
-            return `
-                <div class="feedback-item ${statusClass}">
-                    <div class="feedback-item-header">
-                        <span class="feedback-time" title="${date.toLocaleString()}">${timeAgo}</span>
-                        <span class="feedback-status ${statusClass}">${statusText}</span>
-                    </div>
-                    <div class="feedback-item-content">${FormattingUtils.escapeHtml(fb.feedback)}</div>
-                    <div class="feedback-item-footer">
-                        <span class="feedback-state">Submitted during: ${stateText}</span>
-                        ${fb.applied && fb.appliedAt ? `<span class="feedback-applied-at">Applied: ${FormattingUtils.formatRelativeTime(fb.appliedAt)}</span>` : ''}
-                    </div>
-                </div>
-            `;
-        }).join('');
-        
-    } catch (err) {
-        console.error('Error loading feedback history:', err);
-        listContainer.innerHTML = '<p class="error-text">Error loading feedback history</p>';
-    }
-}
-
-/**
- * Updates the feedback section based on current task state
- */
-function updateFeedbackSectionState() {
-    const section = document.getElementById('agentFeedbackSection');
-    const submitBtn = document.getElementById('submitFeedbackBtn');
-    const rerunCheckbox = document.getElementById('triggerRerunCheckbox');
-    const rerunLabel = rerunCheckbox?.parentElement;
-    
-    if (!section || !taskData?.taskState) return;
-    
-    const state = taskData.taskState.state;
-    
-    // States where rerun can be triggered
-    const rerunnableStates = ['pending', 'completed', 'rejected', 'awaiting_approval', 'error'];
-    const isRerunnable = rerunnableStates.includes(state);
-    
-    // States where agent is actively running
-    const runningStates = ['in_progress', 'testing'];
-    const isRunning = runningStates.includes(state);
-    
-    // Update rerun checkbox visibility and state
-    if (rerunLabel) {
-        if (isRunning) {
-            rerunLabel.classList.add('disabled');
-            rerunLabel.title = 'Cannot trigger rerun while agent is running';
-            if (rerunCheckbox) {
-                rerunCheckbox.disabled = true;
-                rerunCheckbox.checked = false;
-            }
-        } else if (!isRerunnable) {
-            rerunLabel.classList.add('disabled');
-            rerunLabel.title = `Rerun not available in ${state} state`;
-            if (rerunCheckbox) {
-                rerunCheckbox.disabled = true;
-                rerunCheckbox.checked = false;
-            }
-        } else {
-            rerunLabel.classList.remove('disabled');
-            rerunLabel.title = '';
-            if (rerunCheckbox) rerunCheckbox.disabled = false;
-        }
-    }
-    
-    // Update submit button text based on state
-    if (submitBtn && isRunning) {
-        // When running, feedback will be queued for next run
-        submitBtn.title = 'Feedback will be applied when agent runs again';
-    } else {
-        submitBtn?.removeAttribute('title');
-    }
-}
 
 // ============================================
 // Error Recovery System

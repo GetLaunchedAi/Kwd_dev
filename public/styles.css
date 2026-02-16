@@ -1368,6 +1368,51 @@ button, input, select {
     gap: 12px;
 }
 
+/* Reject Modal Styling */
+.reject-hint {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+.reject-feedback-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px 14px;
+    font-size: 14px;
+    line-height: 1.6;
+    font-family: inherit;
+    color: var(--text-main);
+    background: var(--bg-input);
+    border: 2px solid var(--border-main);
+    border-radius: var(--radius-md);
+    resize: vertical;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.reject-feedback-textarea:focus {
+    outline: none;
+    border-color: var(--color-danger);
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1);
+}
+
+.reject-feedback-textarea::placeholder {
+    color: var(--text-tertiary);
+}
+
+.reject-char-count {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: color 0.2s ease;
+}
+
+.reject-char-count.valid {
+    color: var(--color-success);
+}
+
 .form-group {
     margin-bottom: 24px;
 }
@@ -6382,39 +6427,61 @@ input[type="color"]::-webkit-color-swatch {
     border-top: 1px solid var(--border-color);
 }
 
-.sections-title {
+.sections-header {
     margin-bottom: var(--spacing-md);
+}
+
+.sections-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 14px;
     font-weight: 600;
     color: var(--text-secondary);
+    margin: 0;
+}
+
+.sections-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+    border-radius: 100px;
 }
 
 .sections-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: var(--spacing-sm);
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--spacing-md);
 }
 
 .section-thumbnail {
     position: relative;
-    aspect-ratio: 16/9;
     border-radius: var(--radius-md);
     overflow: hidden;
     cursor: pointer;
     background: var(--bg-secondary);
-    border: 2px solid transparent;
-    transition: all var(--transition-fast);
+    border: 2px solid var(--border-main);
+    transition: all 0.2s ease;
 }
 
 .section-thumbnail:hover {
     border-color: var(--color-primary);
     transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
 }
 
 .section-thumbnail img {
     width: 100%;
-    height: 100%;
+    aspect-ratio: 4/3;
     object-fit: cover;
+    display: block;
 }
 
 .section-thumbnail.error img {
@@ -6428,20 +6495,32 @@ input[type="color"]::-webkit-color-swatch {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
+    background: var(--bg-secondary);
 }
 
-.section-info {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 4px 6px;
-    background: linear-gradient(transparent, rgba(0,0,0,0.7));
-    color: white;
-    font-size: 10px;
-    font-weight: 500;
+.section-label {
+    padding: 8px 10px;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-main);
+}
+
+.section-name {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.section-tag {
+    display: block;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -6601,7 +6680,7 @@ input[type="color"]::-webkit-color-swatch {
     }
     
     .sections-grid {
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     }
     
     .lightbox-prev,
@@ -6626,6 +6705,10 @@ input[type="color"]::-webkit-color-swatch {
 
 .dark-theme .section-thumbnail {
     background: var(--bg-tertiary);
+}
+
+.dark-theme .section-label {
+    background: var(--bg-secondary);
 }
 
 /* ============================================
