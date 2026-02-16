@@ -22,6 +22,7 @@ import { webhookStateManager } from './state/webhookState';
 import { writeJsonAtomic } from './storage/jsonStore';
 import { loadConfig } from './config/config';
 import { validateModel, validateModelFields } from './utils/modelValidator';
+import { createSession, validateSession, destroySession } from './utils/sessionManager';
 import multer from 'multer';
 
 // Reporting and Monitoring Routers
@@ -200,6 +201,153 @@ function trackFailedImport(taskId: string, taskName: string, error: string, clic
 
 // Middleware
 app.use(express.json());
+
+// Cookie parser helper (simple implementation, no dependency needed)
+function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!cookieHeader) return cookies;
+  cookieHeader.split(';').forEach(cookie => {
+    const [name, ...rest] = cookie.split('=');
+    if (name) {
+      cookies[name.trim()] = decodeURIComponent(rest.join('=').trim());
+    }
+  });
+  return cookies;
+}
+
+// ============================================================
+// AUTH: Login, Logout, Check endpoints (BEFORE auth middleware)
+// ============================================================
+
+// Serve login.html without auth
+app.get('/login.html', (req: Request, res: Response) => {
+  const loginPath = path.join(process.cwd(), 'public', 'login.html');
+  if (fs.existsSync(loginPath)) {
+    res.sendFile(loginPath);
+  } else {
+    res.status(404).send('Login page not found');
+  }
+});
+
+// Serve login page styles/scripts without auth
+app.get('/styles.css', (req: Request, res: Response) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'styles.css'));
+});
+
+// Login endpoint
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+    
+    const expectedUsername = config.auth?.username || 'admin';
+    const expectedPassword = config.auth?.password || 'admin';
+    
+    if (username !== expectedUsername || password !== expectedPassword) {
+      logger.warn(`Failed login attempt for user: ${username} from IP: ${req.ip}`);
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    
+    const token = await createSession();
+    
+    // Set HttpOnly cookie for browser requests
+    const maxAge = (config.auth?.sessionDuration || 3) * 60 * 60 * 1000;
+    res.cookie('kwd_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge,
+      path: '/',
+    });
+    
+    logger.info(`User "${username}" logged in successfully from IP: ${req.ip}`);
+    res.json({ success: true, token });
+  } catch (error: any) {
+    logger.error(`Login error: ${error.message}`);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', async (req: Request, res: Response) => {
+  try {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = cookies['kwd_session'] || req.headers.authorization?.replace('Bearer ', '');
+    
+    if (token) {
+      await destroySession(token);
+    }
+    
+    res.clearCookie('kwd_session', { path: '/' });
+    res.json({ success: true });
+  } catch (error: any) {
+    logger.error(`Logout error: ${error.message}`);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Session check endpoint
+app.get('/api/auth/check', async (req: Request, res: Response) => {
+  try {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = cookies['kwd_session'] || req.headers.authorization?.replace('Bearer ', '');
+    
+    const valid = await validateSession(token);
+    res.json({ authenticated: valid });
+  } catch (error: any) {
+    res.json({ authenticated: false });
+  }
+});
+
+// ============================================================
+// AUTH MIDDLEWARE: Protect all routes except public ones
+// ============================================================
+const PUBLIC_PATH_PREFIXES = [
+  '/api/auth/',      // Auth endpoints
+  '/health',         // Health checks
+  '/api/health',     // API health check
+  '/webhook/',       // ClickUp webhooks
+  '/approve/',       // Email approval links
+  '/reject/',        // Email rejection links
+  '/auth/clickup',   // ClickUp OAuth flow
+  '/login.html',     // Login page
+  '/styles.css',     // Global styles (needed for login page)
+];
+
+app.use(async (req: Request, res: Response, next) => {
+  // Allow public paths through without auth
+  const isPublic = PUBLIC_PATH_PREFIXES.some(prefix => req.path.startsWith(prefix));
+  if (isPublic) {
+    return next();
+  }
+  
+  // Get token from cookie or Authorization header
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies['kwd_session'] || req.headers.authorization?.replace('Bearer ', '');
+  
+  const valid = await validateSession(token);
+  
+  if (!valid) {
+    // For API requests, return 401 JSON
+    if (req.path.startsWith('/api/')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // For HTML page requests, redirect to login
+    const accept = req.headers.accept || '';
+    if (accept.includes('text/html') || (!req.path.includes('.') && !req.path.startsWith('/api/'))) {
+      return res.redirect('/login.html');
+    }
+    
+    // For static assets (CSS, JS, images) when not authenticated, return 401
+    return res.status(401).send('Authentication required');
+  }
+  
+  next();
+});
 
 // Multer configuration for demo creation
 const uploadDir = path.join(process.cwd(), 'temp-uploads');

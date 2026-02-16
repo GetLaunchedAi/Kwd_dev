@@ -309,6 +309,18 @@ button, input, select {
     box-shadow: var(--shadow-sm);
 }
 
+#logoutBtn {
+    margin-top: 8px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+#logoutBtn:hover {
+    color: var(--color-danger);
+    border-color: var(--color-danger);
+    background: var(--color-danger-soft);
+}
+
 /* Top Header */
 .top-header {
     height: var(--header-height);

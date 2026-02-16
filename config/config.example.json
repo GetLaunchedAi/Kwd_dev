@@ -72,7 +72,9 @@
     "enableEmailNotifications": true
   },
   "auth": {
-    "sessionDuration": 3
+    "sessionDuration": 3,
+    "username": "admin",
+    "password": "env:AUTH_PASSWORD"
   },
   "netlify": {
     "apiToken": "env:NETLIFY_API_TOKEN",

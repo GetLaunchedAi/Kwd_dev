@@ -94,6 +94,23 @@ const ThemeUtils = {
     }
 };
 
+// ============================================================
+// Logout Handler (used by all pages via sidebar Sign Out button)
+// ============================================================
+async function handleLogout() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+        // Ignore errors - we're logging out anyway
+    }
+    localStorage.removeItem('kwd_session_token');
+    localStorage.removeItem('clickup_session_token');
+    window.location.href = '/login.html';
+}
+
+// Expose globally
+window.handleLogout = handleLogout;
+
 // For backwards compatibility, expose functions at window level
 // This allows existing code to work while transitioning to ThemeUtils
 window.initTheme = () => ThemeUtils.init();

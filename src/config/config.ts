@@ -91,6 +91,8 @@ export interface ApprovalConfig {
 
 export interface AuthConfig {
   sessionDuration: number;
+  username: string;
+  password: string;
 }
 
 export interface ScreenshotsConfig {
@@ -142,6 +144,8 @@ const OPTIONAL_ENV_VARS = new Set([
   'IMAGE_RETRIEVER_PATH', // Optional path to ImageRetriever tool
   'NETLIFY_API_TOKEN', // Optional for Netlify deployment integration
   'NETLIFY_ACCOUNT_SLUG', // Optional Netlify account/team slug
+  'AUTH_USERNAME', // Optional auth username (defaults to 'admin')
+  'AUTH_PASSWORD', // Optional auth password (defaults to 'admin')
 ]);
 
 function resolveEnvValue(value: string, required: boolean = true): string {
@@ -279,6 +283,20 @@ export function loadConfig(): Config {
   // oauthConfigured defaults to false - user must confirm in Settings
   if (resolved.netlify.oauthConfigured === undefined) {
     resolved.netlify.oauthConfigured = false;
+  }
+
+  // Set default values for auth configuration
+  if (!resolved.auth) {
+    resolved.auth = {};
+  }
+  if (!resolved.auth.sessionDuration) {
+    resolved.auth.sessionDuration = 3;
+  }
+  if (!resolved.auth.username) {
+    resolved.auth.username = 'admin';
+  }
+  if (!resolved.auth.password) {
+    resolved.auth.password = 'admin';
   }
 
   // Validate and return

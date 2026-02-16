@@ -12,7 +12,8 @@ class ApiClient {
         const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
         
         // Add Authorization header if session token exists
-        const token = localStorage.getItem('clickup_session_token');
+        // Prefer kwd_session_token (new auth) over clickup_session_token (legacy)
+        const token = localStorage.getItem('kwd_session_token') || localStorage.getItem('clickup_session_token');
         const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
 
         const config = {
@@ -41,6 +42,16 @@ class ApiClient {
                     const error = new Error(errorData.error || `HTTP error! status: ${response.status}`);
                     error.status = response.status;
                     error.data = errorData; // Preserve full structured response for callers
+                    
+                    // Redirect to login on 401 (session expired or not authenticated)
+                    if (response.status === 401) {
+                        localStorage.removeItem('kwd_session_token');
+                        const currentPage = window.location.pathname + window.location.search;
+                        if (!window.location.pathname.includes('login.html')) {
+                            window.location.href = '/login.html?redirect=' + encodeURIComponent(currentPage);
+                        }
+                        throw error;
+                    }
                     
                     // Don't retry on 4xx errors (client errors) - throw immediately without retry
                     if (response.status >= 400 && response.status < 500) {
