@@ -1,7 +1,27 @@
 import * as path from 'path';
+import * as fs from 'fs-extra';
 import simpleGit, { SimpleGit } from 'simple-git';
 import { config } from '../config/config';
 import { logger } from '../utils/logger';
+
+/**
+ * Creates a simpleGit instance that is guaranteed to operate inside `folderPath`.
+ *
+ * Validates that `folderPath` contains its own `.git` (directory or file).  Without
+ * this check, simpleGit silently walks up the directory tree and may find a parent
+ * repository, causing operations (diff, status, etc.) to run in the wrong context
+ * and potentially hit broken submodule references.
+ */
+export async function safeGit(folderPath: string): Promise<SimpleGit> {
+  const gitPath = path.join(folderPath, '.git');
+  if (!(await fs.pathExists(gitPath))) {
+    throw new Error(
+      `Not a git repository: ${folderPath} (no .git found). ` +
+      'Refusing to fall through to a parent repository.'
+    );
+  }
+  return simpleGit(folderPath);
+}
 
 /**
  * Ensures a development branch exists and checks it out.
@@ -94,7 +114,7 @@ export async function pushBranch(
  * Gets the current branch name
  */
 export async function getCurrentBranch(folderPath: string): Promise<string> {
-  const git: SimpleGit = simpleGit(folderPath);
+  const git: SimpleGit = await safeGit(folderPath);
   
   try {
     const status = await git.status();
@@ -114,7 +134,7 @@ export async function getDiff(
   from: string,
   to?: string
 ): Promise<string> {
-  const git: SimpleGit = simpleGit(folderPath);
+  const git: SimpleGit = await safeGit(folderPath);
   
   try {
     const args = to ? [from, to] : [from];
@@ -130,7 +150,7 @@ export async function getDiff(
  * Gets git status
  */
 export async function getStatus(folderPath: string): Promise<any> {
-  const git: SimpleGit = simpleGit(folderPath);
+  const git: SimpleGit = await safeGit(folderPath);
   
   try {
     const status = await git.status();

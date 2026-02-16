@@ -3,6 +3,7 @@ import * as path from 'path';
 import simpleGit, { SimpleGit } from 'simple-git';
 import { config } from '../config/config';
 import { logger } from '../utils/logger';
+import { safeGit } from './branchManager';
 
 export interface ClientFolderInfo {
   path: string;
@@ -255,7 +256,7 @@ export async function pullLatestChanges(folderPath: string, forceReset: boolean 
  * Ensures working directory is clean (or warns if not)
  */
 export async function ensureCleanWorkingDirectory(folderPath: string): Promise<boolean> {
-  const git: SimpleGit = simpleGit(folderPath);
+  const git: SimpleGit = await safeGit(folderPath);
   
   try {
     const status = await git.status();
@@ -270,7 +271,7 @@ export async function ensureCleanWorkingDirectory(folderPath: string): Promise<b
  * Gets the current HEAD commit hash
  */
 export async function getCurrentCommitHash(clientFolder: string): Promise<string | null> {
-  const git: SimpleGit = simpleGit(clientFolder);
+  const git: SimpleGit = await safeGit(clientFolder);
   
   try {
     const log = await git.log(['-1']);
@@ -288,7 +289,7 @@ export async function getCurrentCommitHash(clientFolder: string): Promise<string
  * Gets the commit count on a specific branch
  */
 export async function getCommitCount(clientFolder: string, branchName: string): Promise<number> {
-  const git: SimpleGit = simpleGit(clientFolder);
+  const git: SimpleGit = await safeGit(clientFolder);
   
   try {
     const log = await git.log([branchName]);
@@ -303,7 +304,7 @@ export async function getCommitCount(clientFolder: string, branchName: string): 
  * Checks if there are uncommitted changes in the working directory
  */
 export async function hasUncommittedChanges(clientFolder: string): Promise<boolean> {
-  const git: SimpleGit = simpleGit(clientFolder);
+  const git: SimpleGit = await safeGit(clientFolder);
   
   try {
     const status = await git.status();
@@ -319,7 +320,7 @@ export async function hasUncommittedChanges(clientFolder: string): Promise<boole
  * Captures the baseline git state (commit hash and branch) for comparison
  */
 export async function getBaselineState(clientFolder: string, branchName: string): Promise<GitBaselineState> {
-  const git: SimpleGit = simpleGit(clientFolder);
+  const git: SimpleGit = await safeGit(clientFolder);
   
   try {
     const commitHash = await getCurrentCommitHash(clientFolder);

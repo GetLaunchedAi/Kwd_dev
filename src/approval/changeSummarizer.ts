@@ -46,7 +46,13 @@ export async function generateChangeSummary(
   }
   
   // Get git status to see file changes
-  const status = await getStatus(folderPath);
+  let status: any = null;
+  try {
+    status = await getStatus(folderPath);
+  } catch (statusError: any) {
+    logger.error(`Error getting git status: ${statusError.message}`);
+    // Continue with null status — buildFileList handles it gracefully
+  }
   
   // Parse diff to extract statistics
   const diffStats = parseDiffStats(fullDiff);
@@ -216,6 +222,8 @@ function buildFileList(
   diffStats: { fileStats: Map<string, { additions: number; deletions: number }> }
 ): Array<{ path: string; status: string; additions?: number; deletions?: number }> {
   const fileList: Array<{ path: string; status: string; additions?: number; deletions?: number }> = [];
+
+  if (!status) return fileList; // No status available (git error) — return empty list
 
   const isInternalFile = (filePath: string) => {
     return filePath.startsWith('.clickup-workflow/') || 
