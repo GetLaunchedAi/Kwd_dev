@@ -2311,6 +2311,33 @@ app.get('/api/models', async (req: Request, res: Response) => {
   }
 });
 
+// Get default system prompt (Role section from task template)
+app.get('/api/default-system-prompt', async (req: Request, res: Response) => {
+  try {
+    const templatePath = path.join(__dirname, 'cursor', 'task_template.md');
+    let roleContent = '';
+
+    if (await fs.pathExists(templatePath)) {
+      const template = await fs.readFile(templatePath, 'utf-8');
+      // Extract the Role section content (between "## Role" and the next "## " heading)
+      const roleMatch = template.match(/## Role\n([\s\S]*?)(?=\n## )/);
+      if (roleMatch) {
+        roleContent = roleMatch[1].trim();
+      }
+    }
+
+    if (!roleContent) {
+      // Fallback default
+      roleContent = 'You are a senior front-end + UX-minded full-stack engineer. Implement the requested website design/functional change with minimal, safe diffs, following existing patterns and standards. Do a careful self-review, manually verify the change works, commit (no push), update status, then exit.';
+    }
+
+    res.json({ systemPrompt: roleContent });
+  } catch (error: any) {
+    logger.error(`Error fetching default system prompt: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get known Cursor models (for autocomplete and validation)
 app.get('/api/cursor/known-models', async (req: Request, res: Response) => {
   try {

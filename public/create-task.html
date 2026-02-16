@@ -157,14 +157,19 @@
                             </div>
 
                             <div class="form-group">
-                                <label for="systemPrompt">System Prompt</label>
+                                <div class="label-row">
+                                    <label for="systemPrompt">System Prompt</label>
+                                    <button type="button" id="resetPromptBtn" class="btn btn-ghost btn-xs" title="Reset to default system prompt">
+                                        <i data-lucide="rotate-ccw"></i> Reset to Default
+                                    </button>
+                                </div>
                                 <div class="input-wrapper">
                                     <i data-lucide="file-text"></i>
                                     <textarea id="systemPrompt" name="systemPrompt" 
-                                              placeholder="Optional: Custom system prompt for the AI agent. Leave blank to use the default template."
+                                              placeholder="Loading default system prompt..."
                                               rows="8"></textarea>
                                 </div>
-                                <small class="text-hint">Optional: Provide a custom system prompt to guide the AI agent's behavior. If left blank, the default template will be used.</small>
+                                <small class="text-hint">The default agent instructions are shown above. Edit to customize how the AI agent approaches this task.</small>
                             </div>
 
                             <div class="form-group">

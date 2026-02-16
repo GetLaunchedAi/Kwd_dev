@@ -732,6 +732,21 @@ function renderTaskDetails() {
     document.getElementById('clientName').textContent = taskInfo.clientName || 'N/A';
     document.getElementById('branchName').textContent = taskState.branchName || 'N/A';
     
+    // Model display in metadata
+    const taskModelEl = document.getElementById('taskModel');
+    if (taskModelEl) {
+        taskModelEl.textContent = taskInfo.model || 'Default';
+    }
+    
+    // Sync the agent model dropdown with the task's configured model
+    const agentModelSelect = document.getElementById('agentModelSelect');
+    if (agentModelSelect && taskInfo.model) {
+        const options = Array.from(agentModelSelect.options);
+        if (options.some(o => o.value === taskInfo.model)) {
+            agentModelSelect.value = taskInfo.model;
+        }
+    }
+    
     // Setup ClickUp link (hide for local tasks)
     const link = document.getElementById('clickUpUrl');
     const isLocalTask = taskId && taskId.startsWith('local-');
@@ -1471,6 +1486,10 @@ async function loadAvailableModels() {
         availableModelsCache = modelsData.availableModels || ['gpt-4', 'gpt-4-turbo', 'claude-3.5-sonnet'];
         const defaultModel = modelsData.defaultModel || 'gpt-4';
         
+        // Use the task's configured model if available, otherwise fall back to server default
+        const taskModel = taskData?.taskInfo?.model;
+        const selectedModel = taskModel || defaultModel;
+        
         const agentModelSelect = document.getElementById('agentModelSelect');
         const retryModelSelect = document.getElementById('retryModelSelect');
         
@@ -1480,7 +1499,7 @@ async function loadAvailableModels() {
                 const option = document.createElement('option');
                 option.value = model;
                 option.textContent = model;
-                if (model === defaultModel) option.selected = true;
+                if (model === selectedModel) option.selected = true;
                 agentModelSelect.appendChild(option);
             });
         }

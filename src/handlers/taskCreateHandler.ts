@@ -240,41 +240,37 @@ export async function createTask(input: CreateTaskInput): Promise<CreateTaskResu
       undefined // testCommand – detected when agent runs
     );
 
-    // 2.4 FIX: Inject custom system prompt into the template structure instead
-    // of blindly overwriting the whole file (which strips Task ID, branch, etc.)
+    // Replace the Role section in CURSOR_TASK.md with the user's custom system prompt.
+    // This keeps all template structure (metadata, constraints, etc.) intact while
+    // letting the user control the agent's behavioral instructions.
     if (input.systemPrompt && typeof input.systemPrompt === 'string' && input.systemPrompt.trim().length > 0) {
       const existingContent = await fs.readFile(promptPath, 'utf-8');
-      const customSection = [
-        '',
-        '## Custom Instructions',
-        '',
-        input.systemPrompt.trim(),
-        '',
-      ].join('\n');
+      const customPrompt = input.systemPrompt.trim();
 
-      // Insert the custom section right before "## 2. Operating Rules" (template)
-      // or before "## 3. Metadata" (fallback) so it appears prominently
+      // Replace content between "## Role" and the next "## " heading
+      const roleRegex = /(## Role\n)([\s\S]*?)(\n## )/;
       let updatedContent: string;
-      if (existingContent.includes('## 2. Operating Rules')) {
-        updatedContent = existingContent.replace(
-          '## 2. Operating Rules',
-          customSection + '\n## 2. Operating Rules'
-        );
-      } else if (existingContent.includes('## 3. Constraints')) {
-        updatedContent = existingContent.replace(
-          '## 3. Constraints',
-          customSection + '\n## 3. Constraints'
-        );
+
+      if (roleRegex.test(existingContent)) {
+        updatedContent = existingContent.replace(roleRegex, `$1${customPrompt}\n$3`);
       } else {
-        // Append at the end as a last resort
-        updatedContent = existingContent + '\n' + customSection;
+        // Fallback: inject as Custom Instructions if Role section not found
+        const customSection = `\n## Custom Instructions\n\n${customPrompt}\n`;
+        if (existingContent.includes('## 2. Operating Rules')) {
+          updatedContent = existingContent.replace(
+            '## 2. Operating Rules',
+            customSection + '\n## 2. Operating Rules'
+          );
+        } else {
+          updatedContent = existingContent + '\n' + customSection;
+        }
       }
 
       await fs.writeFile(promptPath, updatedContent, 'utf-8');
 
       // Save a flag so shouldGeneratePrompt() knows this is a custom-prompt task
       await saveTaskState(clientFolder, taskId, { customSystemPrompt: true } as any);
-      logger.info(`Custom system prompt injected for task ${taskId} at ${promptPath}`);
+      logger.info(`Custom system prompt applied for task ${taskId} at ${promptPath}`);
     }
 
     logger.info(

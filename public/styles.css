@@ -568,6 +568,28 @@ button, input, select {
     font-size: 13px;
 }
 
+.btn-xs {
+    padding: 3px 8px;
+    font-size: 12px;
+    gap: 4px;
+}
+
+.btn-xs .lucide {
+    width: 12px;
+    height: 12px;
+}
+
+.label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.label-row label {
+    margin-bottom: 0;
+}
+
 .divider-v {
     width: 1px;
     height: 24px;

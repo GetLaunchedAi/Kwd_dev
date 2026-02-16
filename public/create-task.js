@@ -6,6 +6,7 @@ let createdTaskId = null;
 let createdClientFolder = null;
 let createdModel = null; // Track model used during creation for trigger-agent call
 let triggerInFlight = false; // Guard against double-click / re-entry
+let defaultSystemPrompt = ''; // Stores the server default for comparison
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', async () => {
@@ -18,7 +19,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load data
     await Promise.all([
         loadClients(),
-        loadModels()
+        loadModels(),
+        loadDefaultSystemPrompt()
     ]);
     
     // Setup event listeners
@@ -96,6 +98,24 @@ async function loadModels() {
 }
 
 /**
+ * Load the default system prompt from the server and pre-fill the textarea
+ */
+async function loadDefaultSystemPrompt() {
+    try {
+        const data = await api.get('/default-system-prompt');
+        defaultSystemPrompt = data.systemPrompt || '';
+        
+        const systemPromptEl = document.getElementById('systemPrompt');
+        if (systemPromptEl && defaultSystemPrompt) {
+            systemPromptEl.value = defaultSystemPrompt;
+        }
+    } catch (error) {
+        console.error('Error loading default system prompt:', error);
+        // Non-critical error, just leave the textarea empty
+    }
+}
+
+/**
  * Setup event listeners
  */
 function setupEventListeners() {
@@ -120,6 +140,17 @@ function setupEventListeners() {
     cancelBtn.addEventListener('click', () => {
         window.location.href = '/index.html';
     });
+    
+    // Reset system prompt to default
+    const resetPromptBtn = document.getElementById('resetPromptBtn');
+    if (resetPromptBtn) {
+        resetPromptBtn.addEventListener('click', () => {
+            const systemPromptEl = document.getElementById('systemPrompt');
+            if (systemPromptEl && defaultSystemPrompt) {
+                systemPromptEl.value = defaultSystemPrompt;
+            }
+        });
+    }
     
     // Success action buttons
     viewTaskBtn.addEventListener('click', () => {
@@ -165,7 +196,9 @@ async function handleSubmit(e) {
     const description = document.getElementById('taskDescription').value.trim();
     const clientName = document.getElementById('clientSelect').value;
     const model = document.getElementById('modelSelect').value;
-    const systemPrompt = document.getElementById('systemPrompt').value.trim();
+    const systemPromptRaw = document.getElementById('systemPrompt').value.trim();
+    // Only send systemPrompt if the user actually modified it from the default
+    const systemPrompt = (systemPromptRaw && systemPromptRaw !== defaultSystemPrompt) ? systemPromptRaw : '';
     const notificationEmail = document.getElementById('notificationEmail').value.trim();
     
     // Validate again
@@ -314,6 +347,12 @@ function resetForm() {
     
     // Reset form fields
     form.reset();
+    
+    // Re-fill system prompt with default (form.reset() clears it)
+    const systemPromptEl = document.getElementById('systemPrompt');
+    if (systemPromptEl && defaultSystemPrompt) {
+        systemPromptEl.value = defaultSystemPrompt;
+    }
     
     // Reset button state
     submitBtn.disabled = true;
