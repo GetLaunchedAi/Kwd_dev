@@ -4,6 +4,8 @@ let clients = [];
 let models = [];
 let createdTaskId = null;
 let createdClientFolder = null;
+let createdModel = null; // Track model used during creation for trigger-agent call
+let triggerInFlight = false; // Guard against double-click / re-entry
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', async () => {
@@ -34,10 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
  */
 async function loadClients() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/clients`);
-        if (!response.ok) throw new Error('Failed to load clients');
-        
-        clients = await response.json();
+        clients = await api.get('/clients');
         
         const clientSelect = document.getElementById('clientSelect');
         const noClientsMessage = document.getElementById('noClientsMessage');
@@ -74,10 +73,7 @@ async function loadClients() {
  */
 async function loadModels() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/models`);
-        if (!response.ok) throw new Error('Failed to load models');
-        
-        const data = await response.json();
+        const data = await api.get('/models');
         models = data.availableModels || [];
         
         const modelSelect = document.getElementById('modelSelect');
@@ -170,6 +166,7 @@ async function handleSubmit(e) {
     const clientName = document.getElementById('clientSelect').value;
     const model = document.getElementById('modelSelect').value;
     const systemPrompt = document.getElementById('systemPrompt').value.trim();
+    const notificationEmail = document.getElementById('notificationEmail').value.trim();
     
     // Validate again
     if (!title || !description || !clientName) {
@@ -182,29 +179,19 @@ async function handleSubmit(e) {
     submitBtn.innerHTML = '<div class="spinner-small"></div><span>Creating...</span>';
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/tasks/create`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                title,
-                description,
-                clientName,
-                model: model || undefined,
-                systemPrompt: systemPrompt || undefined
-            })
+        const data = await api.post('/tasks/create', {
+            title,
+            description,
+            clientName,
+            model: model || undefined,
+            systemPrompt: systemPrompt || undefined,
+            notificationEmail: notificationEmail || undefined
         });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to create task');
-        }
         
         // Store created task info
         createdTaskId = data.taskId;
         createdClientFolder = data.clientFolder;
+        createdModel = model || undefined; // Remember model for trigger-agent call
         
         // Show success
         showSuccess(data);
@@ -244,27 +231,38 @@ function showSuccess(data) {
 }
 
 /**
- * Handle trigger agent button
+ * Handle trigger agent button click.
+ * Sends the model used during task creation and handles structured
+ * 402 (credit) / 422 (model) error responses from the backend.
  */
 async function handleTriggerAgent() {
     if (!createdTaskId) return;
+    
+    // Prevent double-click / re-entry
+    if (triggerInFlight) return;
+    triggerInFlight = true;
     
     const triggerBtn = document.getElementById('triggerAgentBtn');
     triggerBtn.disabled = true;
     triggerBtn.innerHTML = '<div class="spinner-small"></div><span>Starting Agent...</span>';
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/tasks/${encodeURIComponent(createdTaskId)}/trigger-agent`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+        const data = await api.post(
+            `/tasks/${encodeURIComponent(createdTaskId)}/trigger-agent`,
+            { model: createdModel }
+        );
         
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to trigger agent');
+        // Handle model error returned on 200 (defensive – server may also return 422)
+        if (data.modelError) {
+            const failedModel = data.failedModel || createdModel || 'unknown';
+            showNotification(
+                `Model "${failedModel}" is unavailable. Please select a different model on the task page.`,
+                'error'
+            );
+            triggerBtn.disabled = false;
+            triggerBtn.innerHTML = '<i data-lucide="bot"></i><span>Run Agent Now</span>';
+            if (window.lucide) lucide.createIcons();
+            return;
         }
         
         showNotification('Agent started successfully!', 'success');
@@ -276,11 +274,32 @@ async function handleTriggerAgent() {
         
     } catch (error) {
         console.error('Error triggering agent:', error);
-        showNotification(error.message || 'Failed to start agent', 'error');
+        
+        // Handle structured error responses from the backend
+        const errorData = error.data || {};
+        
+        if (error.status === 402 || errorData.creditError) {
+            // Credit limit error
+            showNotification(
+                errorData.userMessage || 'AI credits exhausted. Please wait for credits to reset.',
+                'error'
+            );
+        } else if (error.status === 422 || errorData.modelError) {
+            // Model unavailable error
+            const failedModel = errorData.failedModel || createdModel || 'unknown';
+            showNotification(
+                errorData.userMessage || `Model "${failedModel}" is unavailable. Please select a different model on the task page.`,
+                'error'
+            );
+        } else {
+            showNotification(error.message || 'Failed to start agent', 'error');
+        }
         
         triggerBtn.disabled = false;
         triggerBtn.innerHTML = '<i data-lucide="bot"></i><span>Run Agent Now</span>';
         if (window.lucide) lucide.createIcons();
+    } finally {
+        triggerInFlight = false;
     }
 }
 
@@ -303,6 +322,8 @@ function resetForm() {
     // Reset stored data
     createdTaskId = null;
     createdClientFolder = null;
+    createdModel = null;
+    triggerInFlight = false;
     
     // Show form, hide success
     successContainer.classList.add('hidden');
@@ -323,13 +344,9 @@ async function checkConnectionStatus() {
     const statusText = document.getElementById('statusText');
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/health`);
-        if (response.ok) {
-            statusIndicator.className = 'status-indicator status-online';
-            statusText.textContent = 'Online';
-        } else {
-            throw new Error('Health check failed');
-        }
+        await api.get('/health');
+        statusIndicator.className = 'status-indicator status-online';
+        statusText.textContent = 'Online';
     } catch (error) {
         statusIndicator.className = 'status-indicator status-offline';
         statusText.textContent = 'Offline';
@@ -340,7 +357,13 @@ async function checkConnectionStatus() {
  * Show notification (uses global notification system if available)
  */
 function showNotification(message, type = 'info') {
-    // Use global notification system if available
+    // Use the global notifications singleton from notifications.js
+    if (typeof notifications !== 'undefined' && typeof notifications.show === 'function') {
+        notifications.show(message, type);
+        return;
+    }
+    
+    // Legacy fallback
     if (window.NotificationUtils && typeof window.NotificationUtils.show === 'function') {
         window.NotificationUtils.show(message, type);
         return;

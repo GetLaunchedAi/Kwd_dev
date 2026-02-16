@@ -41,6 +41,7 @@ import { ClickUpTask, clickUpApiClient } from '../clickup/apiClient';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
 import { demoContextLock } from '../utils/fileLock';
+import { categorizeError } from '../utils/errorCategorizer';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
@@ -193,21 +194,8 @@ export async function processTask(task: ClickUpTask): Promise<void> {
   } catch (error: any) {
     logger.error(`Error processing task ${taskId}: ${error.message}`);
     
-    // Categorize the error for better reporting
-    const errorInfo: Record<string, any> = { error: error.message };
-    
-    if (error.creditError || /usage.?limit|credit|quota/i.test(error.message)) {
-      errorInfo.creditError = true;
-      errorInfo.errorCategory = 'credit_limit';
-      errorInfo.userMessage = 'AI credits exhausted. Please wait for credits to reset.';
-    } else if (error.modelError || /model.*unavailable/i.test(error.message)) {
-      errorInfo.modelError = true;
-      errorInfo.errorCategory = 'model_error';
-    } else if (/auth|unauthorized|not authenticated/i.test(error.message)) {
-      errorInfo.errorCategory = 'auth_error';
-    } else if (/ECONNREFUSED|ENOTFOUND|network/i.test(error.message)) {
-      errorInfo.errorCategory = 'network_error';
-    }
+    // Phase 4.2: Centralized error categorization
+    const errorInfo: Record<string, any> = categorizeError(error);
     
     // Try to update state to error
     try {
@@ -337,8 +325,318 @@ export async function continueWorkflowAfterAgent(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 4.1: Sub-functions extracted from _continueWorkflowAfterAgentInternal
+// ---------------------------------------------------------------------------
+
+/** Shared context passed between the pipeline sub-functions. */
+interface WorkflowContinuationContext {
+  clientFolder: string;
+  runId: string;
+  taskId: string;
+  branchName: string;
+  assigneeEmail?: string;
+  iteration: number;
+  isDemoTask: boolean;
+  currentDemoStep: number;
+  demoTotalSteps: number;
+  state: any;
+  logEvent: (message: string, type?: string) => Promise<void>;
+}
+
 /**
- * Internal implementation of workflow continuation
+ * Captures post-agent artifacts: "after" screenshots, diff patch, and
+ * filters unchanged pages.  Returns screenshot capture status.
+ */
+async function capturePostAgentArtifacts(ctx: WorkflowContinuationContext): Promise<{
+  screenshotCaptureSuccess: boolean;
+  screenshotError?: string;
+}> {
+  let screenshotCaptureSuccess = false;
+  let screenshotError: string | undefined;
+
+  await ctx.logEvent('Capturing screenshots and diff artifacts...', 'workflow');
+
+  let appStartedForAfter = false;
+  try {
+    logger.info(`Taking artifacts for task ${ctx.taskId} (Iteration ${ctx.iteration}, runId ${ctx.runId})`);
+    const url = await visualTester.startApp(ctx.clientFolder, true);
+    appStartedForAfter = true;
+
+    // Warmup delay
+    logger.info(`Waiting for app warmup before after screenshots...`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Health check (best-effort)
+    try {
+      const healthCheck = await visualTester.performHealthCheck(url);
+      if (healthCheck.errors.length > 0) {
+        logger.warn(`App health check found ${healthCheck.errors.length} issues, but continuing with after screenshots`);
+      }
+    } catch (healthError: any) {
+      logger.warn(`Health check failed: ${healthError.message}, but continuing with after screenshots`);
+    }
+
+    // Capture screenshots
+    const useFullScreenshots = config.screenshots?.fullSiteCapture ?? true;
+    let screenshotResult: any;
+    let screenshots: string[] = [];
+
+    if (useFullScreenshots) {
+      screenshotResult = await visualTester.takeSiteScreenshots(url, ctx.taskId, 'after', ctx.iteration, {
+        maxPages: config.screenshots?.maxPages ?? 20,
+        captureSections: config.screenshots?.captureSections ?? true
+      }, ctx.clientFolder);
+
+      if (screenshotResult) {
+        if (screenshotResult.success) {
+          screenshots = [`/screenshots/${ctx.taskId}/after_${ctx.iteration}/home/__fullpage.png`];
+          screenshotCaptureSuccess = true;
+        } else {
+          screenshotError = screenshotResult.error || 'Screenshot capture failed with no pages captured';
+          logger.warn(`Screenshot capture reported failure: ${screenshotError}`);
+        }
+      }
+    }
+
+    // Fallback to simple screenshots
+    if (screenshots.length === 0) {
+      const simpleScreenshots = await visualTester.takeScreenshots(url, ctx.taskId, 'after', ctx.iteration);
+      if (simpleScreenshots.length > 0) {
+        screenshots = simpleScreenshots;
+        screenshotCaptureSuccess = true;
+      }
+    }
+
+    // Save diff artifact
+    const baseCommit = ctx.state.baseCommitHash || 'HEAD~1';
+    const diff = await getDiff(ctx.clientFolder, baseCommit, 'HEAD');
+    await saveArtifact(ctx.taskId, 'diff.patch', diff, process.cwd(), ctx.iteration);
+
+    // Persist screenshot state
+    await updateWorkflowState(ctx.clientFolder, ctx.runId, WorkflowState.IN_PROGRESS, {
+      finalScreenshots: screenshots,
+      screenshotManifest: screenshotResult?.manifestPath,
+      screenshotCaptureSuccess,
+      screenshotError,
+    });
+
+    if (!screenshotCaptureSuccess) {
+      logger.warn(`Screenshot capture FAILED for task ${ctx.taskId}. Error: ${screenshotError || 'Unable to capture any screenshots'}. Workflow will continue without screenshots.`);
+    }
+
+    // Filter unchanged pages
+    if (screenshotCaptureSuccess && screenshotResult?.success) {
+      try {
+        const { filterUnchangedPages } = await import('../utils/screenshotService');
+        const filterResult = await filterUnchangedPages(ctx.taskId, 0, ctx.iteration);
+        if (filterResult.removedCount > 0) {
+          logger.info(`Removed ${filterResult.removedCount} unchanged page(s) from after screenshots for task ${ctx.taskId}`);
+        }
+      } catch (filterErr: any) {
+        logger.debug(`Could not filter unchanged pages: ${filterErr.message}`);
+      }
+    }
+  } catch (artifactError: any) {
+    screenshotError = artifactError.message;
+    logger.warn(`Could not capture step artifacts: ${artifactError.message}`);
+    await ctx.logEvent(`Warning: Screenshot capture failed — ${artifactError.message}`, 'warning');
+    await updateWorkflowState(ctx.clientFolder, ctx.runId, WorkflowState.IN_PROGRESS, {
+      screenshotCaptureSuccess: false,
+      screenshotError: artifactError.message,
+    }).catch(() => {});
+  } finally {
+    if (appStartedForAfter) {
+      try {
+        await visualTester.stopApp(ctx.clientFolder);
+      } catch (stopError: any) {
+        logger.warn(`Failed to stop app after after screenshots: ${stopError.message}`);
+      }
+    }
+  }
+
+  if (screenshotCaptureSuccess) {
+    await ctx.logEvent('✓ Screenshots captured successfully', 'success');
+  }
+
+  return { screenshotCaptureSuccess, screenshotError };
+}
+
+/**
+ * Detects test framework, runs tests, saves results and artifacts.
+ * If tests fail: marks demo step as failed, sends failure notifications, and returns null.
+ * If tests pass: returns the test result object.
+ */
+async function runPostAgentTests(ctx: WorkflowContinuationContext): Promise<any | null> {
+  await updateWorkflowState(ctx.clientFolder, ctx.runId, WorkflowState.TESTING, undefined, 'Running tests');
+  await ctx.logEvent('Running automated tests...', 'workflow');
+
+  const testCommand = await detectTestFramework(ctx.clientFolder);
+  const testResult = await runTests(ctx.clientFolder, testCommand || undefined, ctx.taskId);
+  await saveTestResults(ctx.clientFolder, ctx.runId, testResult);
+  await saveArtifact(ctx.taskId, 'test.log', testResult.output, process.cwd(), ctx.iteration);
+
+  if (!testResult.success) {
+    logger.error(`Tests failed for task ${ctx.taskId} (runId: ${ctx.runId})`);
+    await ctx.logEvent(`✗ Tests failed: ${testResult.error || 'Unknown test error'}`, 'error');
+    await updateWorkflowState(ctx.clientFolder, ctx.runId, WorkflowState.ERROR, {
+      testError: testResult.error,
+    }, 'Tests failed');
+
+    // Mark demo step as failed for error recovery
+    if (ctx.isDemoTask) {
+      try {
+        const currentState = await loadTaskState(ctx.clientFolder, ctx.taskId);
+        const lastCheckpointHash = currentState?.lastCheckpoint?.gitCommitHash;
+        const stepName = getStepName(ctx.currentDemoStep);
+
+        await markStepFailed(
+          ctx.clientFolder, ctx.taskId, ctx.currentDemoStep, stepName,
+          'test_failure',
+          `Tests failed: ${testResult.error || 'Unknown test error'}`,
+          lastCheckpointHash
+        );
+
+        const demoStatusPath = path.join(ctx.clientFolder, 'demo.status.json');
+        if (await fs.pathExists(demoStatusPath)) {
+          const demoStatus = await fs.readJson(demoStatusPath);
+          await fs.writeJson(demoStatusPath, {
+            ...demoStatus,
+            state: 'failed',
+            message: `Tests failed: ${testResult.error || 'Unknown test error'}`,
+            updatedAt: new Date().toISOString(),
+          }, { spaces: 2 });
+        }
+        logger.info(`Marked demo step ${ctx.currentDemoStep} as failed for error recovery (test failure)`);
+      } catch (markErr: any) {
+        logger.warn(`Could not mark demo step as failed: ${markErr.message}`);
+      }
+    }
+
+    // Send failure notifications
+    const enableEmails = config.approval.enableEmailNotifications ?? true;
+    if (config.approval.method === 'email' && enableEmails) {
+      await sendFailureEmail(ctx.taskId, testResult, ctx.assigneeEmail);
+    } else if (config.approval.method === 'slack') {
+      await sendSlackFailureNotification(ctx.taskId, testResult);
+    }
+
+    // ClickUp comment
+    try {
+      const comment = `❌ Workflow failed during testing.\n\nError: ${testResult.error || 'Tests failed'}\n\nManual intervention is required.`;
+      await clickUpApiClient.addComment(ctx.taskId, comment);
+    } catch (commentError: any) {
+      logger.warn(`Could not add failure comment to ClickUp task ${ctx.taskId}: ${commentError.message}`);
+    }
+
+    return null; // signals test failure
+  }
+
+  await ctx.logEvent('✓ Tests passed', 'success');
+  return testResult;
+}
+
+/**
+ * Generates a change summary, creates an approval request, sends notifications,
+ * and updates demo status for the final step.
+ */
+async function createApprovalAndNotify(ctx: WorkflowContinuationContext, testResult: any): Promise<void> {
+  // Generate change summary
+  await updateWorkflowState(ctx.clientFolder, ctx.runId, WorkflowState.TESTING, undefined, 'Generating change summary');
+  await ctx.logEvent('Generating change summary and diff...', 'workflow');
+  const changeSummary = await generateChangeSummary(ctx.clientFolder, ctx.branchName, ctx.state.baseCommitHash);
+
+  // Determine base commit for patch artifact
+  let baseCommit = ctx.state.baseCommitHash;
+  if (!baseCommit) {
+    try {
+      const { simpleGit } = await import('simple-git');
+      const git = simpleGit(ctx.clientFolder);
+      const countStr = await git.raw(['rev-list', '--count', 'HEAD']);
+      const count = parseInt(countStr.trim(), 10);
+      baseCommit = count > 1 ? 'HEAD~1' : 'HEAD';
+    } catch (e) {
+      baseCommit = 'HEAD';
+    }
+  }
+
+  const diff = await getDiff(ctx.clientFolder, baseCommit, 'HEAD');
+  await saveArtifact(ctx.taskId, 'diff.patch', diff, process.cwd(), ctx.iteration);
+  await saveArtifact(ctx.taskId, 'summary.json', JSON.stringify(changeSummary, null, 2), process.cwd(), ctx.iteration);
+
+  const summaryMd = `# Change Summary for Task ${ctx.taskId} (Iteration ${ctx.iteration})\n\n` +
+    `**Files Changed**: ${changeSummary.filesModified}\n` +
+    `**Additions**: ${changeSummary.linesAdded}\n` +
+    `**Deletions**: ${changeSummary.linesRemoved}\n\n` +
+    `## Files List\n` +
+    changeSummary.fileList.map((f: any) => `- ${f.path} (${f.status})`).join('\n') +
+    `\n\n## Diff Preview\n\`\`\`diff\n${changeSummary.diffPreview}\n\`\`\``;
+
+  await saveArtifact(ctx.taskId, 'summary.md', summaryMd, process.cwd(), ctx.iteration);
+  await ctx.logEvent(`✓ Change summary: ${changeSummary.filesModified} files, +${changeSummary.linesAdded}/-${changeSummary.linesRemoved} lines`, 'success');
+
+  // Create approval request
+  await updateWorkflowState(ctx.clientFolder, ctx.runId, WorkflowState.AWAITING_APPROVAL, undefined, 'Creating approval request');
+  await ctx.logEvent('Creating approval request...', 'workflow');
+
+  try {
+    const approvalRequest = await createApprovalRequest(
+      ctx.taskId, ctx.clientFolder, ctx.branchName,
+      changeSummary, testResult, ctx.assigneeEmail
+    );
+
+    const enableEmails = config.approval.enableEmailNotifications ?? true;
+    if (config.approval.method === 'email' && enableEmails) {
+      await sendApprovalEmail(approvalRequest);
+    } else if (config.approval.method === 'slack') {
+      await sendSlackNotification(approvalRequest);
+    }
+
+    logger.info(`Approval request created for task ${ctx.taskId}`);
+    await ctx.logEvent('✓ Workflow complete — awaiting approval', 'success');
+  } catch (approvalError: any) {
+    // Failure to send notification must NOT flip the task to ERROR
+    logger.warn(`Failed to create/send approval request for task ${ctx.taskId}: ${approvalError.message}`);
+    await ctx.logEvent(`Warning: Approval notification failed — ${approvalError.message}`, 'warning');
+    await updateWorkflowState(ctx.clientFolder, ctx.runId, WorkflowState.AWAITING_APPROVAL, {
+      approvalNotificationFailed: true,
+      approvalError: approvalError.message,
+    }, 'Approval notification failed');
+  }
+
+  // Update demo.status.json for final-step demos
+  if (ctx.isDemoTask && ctx.currentDemoStep >= ctx.demoTotalSteps) {
+    try {
+      const demoStatusPath = path.join(ctx.clientFolder, 'demo.status.json');
+      if (await fs.pathExists(demoStatusPath)) {
+        const currentStatus = await fs.readJson(demoStatusPath);
+        await fs.writeJson(demoStatusPath, {
+          ...currentStatus,
+          state: 'awaiting_approval',
+          message: 'All steps complete! Ready for review.',
+          updatedAt: new Date().toISOString(),
+          logs: [...(currentStatus.logs || []), `[${new Date().toLocaleTimeString()}] All ${ctx.demoTotalSteps} steps completed. Awaiting approval.`],
+        }, { spaces: 2 });
+        logger.info(`Updated demo.status.json to awaiting_approval for ${ctx.taskId}`);
+      }
+    } catch (statusErr: any) {
+      logger.warn(`Could not update demo.status.json after final step: ${statusErr.message}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal implementation (now a thin pipeline)
+// ---------------------------------------------------------------------------
+
+/**
+ * Internal implementation of workflow continuation.
+ *
+ * Phase 4.1: Refactored from a single ~400-line function into a pipeline
+ * of three focused sub-functions:
+ *   1. capturePostAgentArtifacts() — screenshots & diff
+ *   2. runPostAgentTests()         — test detection, execution, failure handling
+ *   3. createApprovalAndNotify()   — change summary, approval, notifications
  */
 async function _continueWorkflowAfterAgentInternal(
   clientFolder: string,
@@ -346,42 +644,35 @@ async function _continueWorkflowAfterAgentInternal(
 ): Promise<void> {
   logger.info(`Continuing workflow for run ${runId} after agent completion`);
 
-  // Import taskStatusManager for workflow completion logging
   const { taskStatusManager } = await import('../cursor/taskStatusManager');
 
-  // Helper to append a workflow event to the task's events.ndjson log
   const logEvent = async (message: string, type: string = 'workflow') => {
     try {
       await taskStatusManager.appendLog(runId, { type, message, step: message }, clientFolder);
     } catch (e) {
-      // Best-effort logging — don't break the workflow
+      // Best-effort logging
     }
   };
 
   await logEvent('Agent completed — starting post-completion workflow', 'completion');
 
-  // 1. Load state and info early
+  // 1. Load state and info
   const state = await loadTaskState(clientFolder, runId);
   const runInfo = await loadTaskInfo(clientFolder, runId);
-  
+
   if (!state || !state.branchName) {
     throw new Error(`Task state not found or branch name missing for run ${runId}`);
   }
 
-  // CRITICAL: Distinguish between the current run ID and the external parent Task ID (ClickUp)
   const taskId = runInfo?.taskId || runId;
   const branchName = state.branchName;
-  
-  // ISSUE 6 FIX: Get assignee email from task, or fall back to notificationEmail for local tasks
-  // Local tasks don't have ClickUp assignees, but may have a notificationEmail configured
   const assigneeEmail = runInfo?.task?.assignees?.[0]?.email || runInfo?.notificationEmail;
   const iterationBase = state.revisions?.length || 0;
   let iteration = iterationBase;
 
-  // For demo tasks, use step number in iteration to avoid overwriting artifacts
   let isDemoTask = taskId.startsWith('demo-');
   let currentDemoStep = 1;
-  let demoTotalSteps = 4; // Default to 4 steps
+  let demoTotalSteps = 4;
   if (isDemoTask) {
     try {
       const demoStatusPath = path.join(clientFolder, 'demo.status.json');
@@ -396,140 +687,31 @@ async function _continueWorkflowAfterAgentInternal(
     }
   }
 
-  // 2. Capture artifacts for the step that just finished (screenshots, diff)
-  // This ensures Steps 1-3 of a demo still have their work preserved
-  let screenshotCaptureSuccess = false;
-  let screenshotError: string | undefined;
-  
-  await logEvent('Capturing screenshots and diff artifacts...', 'workflow');
+  // Build shared context for sub-functions
+  const ctx: WorkflowContinuationContext = {
+    clientFolder, runId, taskId, branchName, assigneeEmail,
+    iteration, isDemoTask, currentDemoStep, demoTotalSteps,
+    state, logEvent,
+  };
 
-  let appStartedForAfter = false;
-  try {
-    // Take "after" screenshots for this step
-    logger.info(`Taking artifacts for task ${taskId} (Iteration ${iteration}, runId ${runId})`);
-    const url = await visualTester.startApp(clientFolder, true); // forceLocal: build from modified source
-    appStartedForAfter = true;
-    
-    // Wait for app to fully initialize (warmup delay) - Phase 2 enhancement
-    logger.info(`Waiting for app warmup before after screenshots...`);
-    await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second warmup
-    
-    // Verify app is responding (with error protection) - Phase 2 enhancement
-    try {
-      const healthCheck = await visualTester.performHealthCheck(url);
-      if (healthCheck.errors.length > 0) {
-        logger.warn(`App health check found ${healthCheck.errors.length} issues, but continuing with after screenshots`);
-      }
-    } catch (healthError: any) {
-      logger.warn(`Health check failed: ${healthError.message}, but continuing with after screenshots`);
-    }
-    
-    // Use comprehensive site screenshots if enabled
-    const useFullScreenshots = config.screenshots?.fullSiteCapture ?? true;
-    let screenshotResult;
-    let screenshots: string[] = [];
-    
-    if (useFullScreenshots) {
-      screenshotResult = await visualTester.takeSiteScreenshots(url, taskId, 'after', iteration, {
-        maxPages: config.screenshots?.maxPages ?? 20,
-        captureSections: config.screenshots?.captureSections ?? true
-      }, clientFolder);
-      
-      // ISSUE 2 FIX: Check if screenshots were actually captured
-      if (screenshotResult) {
-        if (screenshotResult.success) {
-          screenshots = [`/screenshots/${taskId}/after_${iteration}/home/__fullpage.png`];
-          screenshotCaptureSuccess = true;
-        } else {
-          // Screenshots were attempted but failed
-          screenshotError = screenshotResult.error || 'Screenshot capture failed with no pages captured';
-          logger.warn(`Screenshot capture reported failure: ${screenshotError}`);
-        }
-      }
-    }
-    
-    // Fallback to simple screenshots if full capture failed or is disabled
-    if (screenshots.length === 0) {
-      const simpleScreenshots = await visualTester.takeScreenshots(url, taskId, 'after', iteration);
-      if (simpleScreenshots.length > 0) {
-        screenshots = simpleScreenshots;
-        screenshotCaptureSuccess = true;
-      }
-    }
-    
-    // Save diff artifact
-    const baseCommit = state.baseCommitHash || 'HEAD~1';
-    const diff = await getDiff(clientFolder, baseCommit, 'HEAD');
-    await saveArtifact(taskId, 'diff.patch', diff, process.cwd(), iteration);
+  // --- Pipeline step 1: Capture artifacts ---
+  await capturePostAgentArtifacts(ctx);
 
-    // Update state with screenshots (even if empty, record the failure)
-    await updateWorkflowState(clientFolder, runId, WorkflowState.IN_PROGRESS, {
-      finalScreenshots: screenshots,
-      screenshotManifest: screenshotResult?.manifestPath,
-      // ISSUE 2 FIX: Record screenshot capture status in state
-      screenshotCaptureSuccess,
-      screenshotError: screenshotError
-    });
-    
-    // ISSUE 2 FIX: Log clear warning if screenshots failed but workflow continues
-    if (!screenshotCaptureSuccess) {
-      logger.warn(`Screenshot capture FAILED for task ${taskId}. Error: ${screenshotError || 'Unable to capture any screenshots'}. Workflow will continue without screenshots.`);
-    }
-    
-    // Filter out pages with no visual changes by comparing before/after hashes
-    if (screenshotCaptureSuccess && screenshotResult?.success) {
-      try {
-        const { filterUnchangedPages } = await import('../utils/screenshotService');
-        const filterResult = await filterUnchangedPages(taskId, 0, iteration);
-        if (filterResult.removedCount > 0) {
-          logger.info(`Removed ${filterResult.removedCount} unchanged page(s) from after screenshots for task ${taskId}`);
-        }
-      } catch (filterErr: any) {
-        logger.debug(`Could not filter unchanged pages: ${filterErr.message}`);
-      }
-    }
-  } catch (artifactError: any) {
-    screenshotError = artifactError.message;
-    logger.warn(`Could not capture step artifacts: ${artifactError.message}`);
-    await logEvent(`Warning: Screenshot capture failed — ${artifactError.message}`, 'warning');
-    // Update state to record the failure
-    await updateWorkflowState(clientFolder, runId, WorkflowState.IN_PROGRESS, {
-      screenshotCaptureSuccess: false,
-      screenshotError: artifactError.message
-    }).catch(() => {}); // Don't fail if state update fails
-  } finally {
-    // Always stop the app to prevent resource leaks
-    if (appStartedForAfter) {
-      try {
-        await visualTester.stopApp(clientFolder);
-      } catch (stopError: any) {
-        logger.warn(`Failed to stop app after after screenshots: ${stopError.message}`);
-      }
-    }
-  }
-
-  if (screenshotCaptureSuccess) {
-    await logEvent('✓ Screenshots captured successfully', 'success');
-  }
-
-  // 3. Handle multi-step demo customization transitions
+  // --- Pipeline step 2: Handle demo step transitions ---
   if (isDemoTask) {
     try {
-      // FIX: Extract the completed step number from runId to prevent race conditions
-      // runId format: "demo-name" (step 1) or "demo-name-step2" (step 2+)
       let completedStep = 1;
       const stepMatch = runId.match(/-step(\d+)$/);
       if (stepMatch) {
         const parsedStep = parseInt(stepMatch[1], 10);
-        // FIX: Validate the extracted step number is valid (1-4 for typical demos)
         if (!isNaN(parsedStep) && parsedStep >= 1 && parsedStep <= 10) {
           completedStep = parsedStep;
         } else {
           logger.warn(`Invalid step number extracted from runId ${runId}: ${parsedStep}. Using step 1.`);
         }
       }
-      
-      // FIX: Cross-check with demo status to ensure consistency
+
+      // Cross-check with demo status
       try {
         const demoStatusPath = path.join(clientFolder, 'demo.status.json');
         if (await fs.pathExists(demoStatusPath)) {
@@ -542,191 +724,22 @@ async function _continueWorkflowAfterAgentInternal(
       } catch (e: any) {
         logger.debug(`Could not cross-check step number with status file: ${e.message}`);
       }
-      
+
       const isMultiStep = await handleDemoStepTransition(clientFolder, taskId, completedStep);
       if (isMultiStep) return;
     } catch (err: any) {
       logger.error(`Error in demo step transition for ${taskId}: ${err.message}`);
-      // Fail hard if demo transition fails to avoid silent skips
       throw err;
     }
   }
 
+  // --- Pipeline step 3: Tests ---
   try {
-    // Step 1: Update state to testing
-    await updateWorkflowState(clientFolder, runId, WorkflowState.TESTING, undefined, 'Running tests');
-    await logEvent('Running automated tests...', 'workflow');
+    const testResult = await runPostAgentTests(ctx);
+    if (!testResult) return; // Tests failed; notifications already sent
 
-    // Step 2: Detect and run tests
-    const testCommand = await detectTestFramework(clientFolder);
-    const testResult = await runTests(clientFolder, testCommand || undefined, taskId);
-    await saveTestResults(clientFolder, runId, testResult);
-    
-    // Step 2.5: Save test logs as artifact
-    await saveArtifact(taskId, 'test.log', testResult.output, process.cwd(), iteration);
-
-    // Step 3: If tests fail, notify and stop
-    if (!testResult.success) {
-      logger.error(`Tests failed for task ${taskId} (runId: ${runId})`);
-      await logEvent(`✗ Tests failed: ${testResult.error || 'Unknown test error'}`, 'error');
-      await updateWorkflowState(clientFolder, runId, WorkflowState.ERROR, {
-        testError: testResult.error,
-      }, 'Tests failed');
-      
-      // FIX: Mark demo step as failed so error recovery (retry/skip) can work
-      if (isDemoTask) {
-        try {
-          const state = await loadTaskState(clientFolder, taskId);
-          const lastCheckpointHash = state?.lastCheckpoint?.gitCommitHash;
-          const stepName = getStepName(currentDemoStep);
-          
-          await markStepFailed(
-            clientFolder,
-            taskId,
-            currentDemoStep,
-            stepName,
-            'test_failure',
-            `Tests failed: ${testResult.error || 'Unknown test error'}`,
-            lastCheckpointHash
-          );
-          
-          // Update demo.status.json for frontend
-          const demoStatusPath = path.join(clientFolder, 'demo.status.json');
-          if (await fs.pathExists(demoStatusPath)) {
-            const demoStatus = await fs.readJson(demoStatusPath);
-            await fs.writeJson(demoStatusPath, {
-              ...demoStatus,
-              state: 'failed',
-              message: `Tests failed: ${testResult.error || 'Unknown test error'}`,
-              updatedAt: new Date().toISOString()
-            }, { spaces: 2 });
-          }
-          
-          logger.info(`Marked demo step ${currentDemoStep} as failed for error recovery (test failure)`);
-        } catch (markErr: any) {
-          logger.warn(`Could not mark demo step as failed: ${markErr.message}`);
-        }
-      }
-
-      // Send failure notifications
-      const enableEmails = config.approval.enableEmailNotifications ?? true;
-      if (config.approval.method === 'email' && enableEmails) {
-        await sendFailureEmail(taskId, testResult, assigneeEmail);
-      } else if (config.approval.method === 'slack') {
-        await sendSlackFailureNotification(taskId, testResult);
-      }
-      
-      // Add comment to ClickUp
-      try {
-        const comment = `❌ Workflow failed during testing.\n\nError: ${testResult.error || 'Tests failed'}\n\nManual intervention is required.`;
-        await clickUpApiClient.addComment(taskId, comment);
-      } catch (commentError: any) {
-        logger.warn(`Could not add failure comment to ClickUp task ${taskId}: ${commentError.message}`);
-      }
-      
-      return;
-    }
-
-    // Step 4: Generate change summary
-    await logEvent('✓ Tests passed', 'success');
-    await updateWorkflowState(clientFolder, runId, WorkflowState.TESTING, undefined, 'Generating change summary');
-    await logEvent('Generating change summary and diff...', 'workflow');
-    const changeSummary = await generateChangeSummary(clientFolder, branchName, state.baseCommitHash);
-    
-    // Step 4.5: Save artifacts (diff and summary)
-    // Robustly determine base commit for the patch artifact
-    let baseCommit = state.baseCommitHash;
-    if (!baseCommit) {
-      try {
-        const { simpleGit } = await import('simple-git');
-        const git = simpleGit(clientFolder);
-        const countStr = await git.raw(['rev-list', '--count', 'HEAD']);
-        const count = parseInt(countStr.trim(), 10);
-        baseCommit = count > 1 ? 'HEAD~1' : 'HEAD';
-      } catch (e) {
-        baseCommit = 'HEAD';
-      }
-    }
-    
-    const diff = await getDiff(clientFolder, baseCommit, 'HEAD');
-    await saveArtifact(taskId, 'diff.patch', diff, process.cwd(), iteration);
-    
-    // Save change summary as JSON artifact
-    await saveArtifact(taskId, 'summary.json', JSON.stringify(changeSummary, null, 2), process.cwd(), iteration);
-    
-    const summaryMd = `# Change Summary for Task ${taskId} (Iteration ${iteration})\n\n` +
-      `**Files Changed**: ${changeSummary.filesModified}\n` +
-      `**Additions**: ${changeSummary.linesAdded}\n` +
-      `**Deletions**: ${changeSummary.linesRemoved}\n\n` +
-      `## Files List\n` +
-      changeSummary.fileList.map(f => `- ${f.path} (${f.status})`).join('\n') +
-      `\n\n## Diff Preview\n\`\`\`diff\n${changeSummary.diffPreview}\n\`\`\``;
-    
-    await saveArtifact(taskId, 'summary.md', summaryMd, process.cwd(), iteration);
-
-    await logEvent(`✓ Change summary: ${changeSummary.filesModified} files, +${changeSummary.linesAdded}/-${changeSummary.linesRemoved} lines`, 'success');
-
-    // Step 5: Create approval request and send notifications
-    // First: persist state = AWAITING_APPROVAL
-    await updateWorkflowState(clientFolder, runId, WorkflowState.AWAITING_APPROVAL, undefined, 'Creating approval request');
-    await logEvent('Creating approval request...', 'workflow');
-
-    try {
-      // Then: attempt to send/create the approval request (Slack/email/dashboard)
-      const approvalRequest = await createApprovalRequest(
-        taskId,
-        clientFolder,
-        branchName,
-        changeSummary,
-        testResult,
-        assigneeEmail
-      );
-
-      // Send notifications based on config
-      const enableEmails = config.approval.enableEmailNotifications ?? true;
-      if (config.approval.method === 'email' && enableEmails) {
-        await sendApprovalEmail(approvalRequest);
-      } else if (config.approval.method === 'slack') {
-        await sendSlackNotification(approvalRequest);
-      }
-
-      logger.info(`Approval request created for task ${taskId}`);
-      await logEvent('✓ Workflow complete — awaiting approval', 'success');
-    } catch (approvalError: any) {
-      // Critical rule: failure to create/send an approval request must not advance the workflow and must not flip the task to ERROR.
-      // It should stay AWAITING_APPROVAL with an error note like approvalNotificationFailed: true.
-      logger.warn(`Failed to create/send approval request for task ${taskId}: ${approvalError.message}`);
-      await logEvent(`Warning: Approval notification failed — ${approvalError.message}`, 'warning');
-      await updateWorkflowState(clientFolder, runId, WorkflowState.AWAITING_APPROVAL, { 
-        approvalNotificationFailed: true,
-        approvalError: approvalError.message
-      }, 'Approval notification failed');
-    }
-
-    // FIX: For demo tasks on final step, also update demo.status.json so frontend shows approval section
-    if (isDemoTask && currentDemoStep >= demoTotalSteps) {
-      try {
-        const demoStatusPath = path.join(clientFolder, 'demo.status.json');
-        if (await fs.pathExists(demoStatusPath)) {
-          const currentStatus = await fs.readJson(demoStatusPath);
-          await fs.writeJson(demoStatusPath, {
-            ...currentStatus,
-            state: 'awaiting_approval',
-            message: 'All steps complete! Ready for review.',
-            updatedAt: new Date().toISOString(),
-            logs: [...(currentStatus.logs || []), `[${new Date().toLocaleTimeString()}] All ${demoTotalSteps} steps completed. Awaiting approval.`]
-          }, { spaces: 2 });
-          logger.info(`Updated demo.status.json to awaiting_approval for ${taskId}`);
-        }
-      } catch (statusErr: any) {
-        logger.warn(`Could not update demo.status.json after final step: ${statusErr.message}`);
-      }
-    }
-
-    // Finally: return (do not continue to push/complete)
-    return;
-    
-
+    // --- Pipeline step 4: Approval & notification ---
+    await createApprovalAndNotify(ctx, testResult);
   } catch (error: any) {
     logger.error(`Error continuing workflow for task ${taskId} (runId: ${runId}): ${error.message}`);
     await logEvent(`✗ Workflow error: ${error.message}`, 'error');

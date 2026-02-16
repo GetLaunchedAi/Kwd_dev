@@ -21,6 +21,7 @@ import { taskStatusManager } from './cursor/taskStatusManager';
 import { webhookStateManager } from './state/webhookState';
 import { writeJsonAtomic } from './storage/jsonStore';
 import { loadConfig } from './config/config';
+import { validateModel, validateModelFields } from './utils/modelValidator';
 import multer from 'multer';
 
 // Reporting and Monitoring Routers
@@ -861,18 +862,10 @@ app.post('/api/demo/create', upload.fields([
       }
     }
 
-    // Validate AI model fields if provided
-    const availableModels = config.cursor.availableModels || [];
-    const modelFields = { aiModel, step1Model, step2Model, step3Model, step4Model };
-    for (const [fieldName, modelValue] of Object.entries(modelFields)) {
-      if (modelValue && typeof modelValue === 'string' && modelValue.trim()) {
-        if (!availableModels.includes(modelValue.trim())) {
-          return res.status(400).json({ 
-            success: false, 
-            error: `Invalid ${fieldName}: ${modelValue}. Available models: ${availableModels.join(', ')}` 
-          });
-        }
-      }
+    // Validate AI model fields if provided (shared utility)
+    const modelFieldsCheck = validateModelFields({ aiModel, step1Model, step2Model, step3Model, step4Model });
+    if (!modelFieldsCheck.valid) {
+      return res.status(400).json({ success: false, error: modelFieldsCheck.error });
     }
 
     const { generateUniqueSlug, createDemo } = await import('./handlers/demoHandler');
@@ -2008,206 +2001,19 @@ app.post('/workflow/continue/:taskId', async (req: Request, res: Response) => {
   }
 });
 
-// Create local task endpoint - creates a task without ClickUp
+// Create local task endpoint - delegates to taskCreateHandler
 app.post('/api/tasks/create', async (req: Request, res: Response) => {
   try {
-    const { title, description, clientName, model, notificationEmail, systemPrompt } = req.body;
-    
-    // Validate required fields
-    if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return res.status(400).json({ error: 'title is required' });
+    const { createTask } = await import('./handlers/taskCreateHandler');
+    const result = await createTask(req.body);
+
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ error: result.error });
     }
-    
-    if (!description || typeof description !== 'string' || description.trim().length === 0) {
-      return res.status(400).json({ error: 'description is required' });
-    }
-    
-    if (!clientName || typeof clientName !== 'string' || clientName.trim().length === 0) {
-      return res.status(400).json({ error: 'clientName is required' });
-    }
-    
-    // Validate title and description lengths
-    const trimmedTitle = title.trim();
-    const trimmedDescription = description.trim();
-    
-    if (trimmedTitle.length > 200) {
-      return res.status(400).json({ error: 'title must be 200 characters or less' });
-    }
-    
-    if (trimmedDescription.length > 5000) {
-      return res.status(400).json({ error: 'description must be 5000 characters or less' });
-    }
-    
-    // Validate client name format (prevent path traversal)
-    const clientNamePattern = /^[a-z0-9-]+$/i;
-    const normalizedClientName = clientName.trim().toLowerCase();
-    
-    if (!clientNamePattern.test(normalizedClientName)) {
-      return res.status(400).json({ 
-        error: 'Invalid client name. Use only letters, numbers, and hyphens.' 
-      });
-    }
-    
-    // Validate model if provided
-    if (model && typeof model === 'string') {
-      const availableModels = config.cursor.availableModels || [];
-      if (!availableModels.includes(model)) {
-        return res.status(400).json({ 
-          error: `Invalid model: ${model}`,
-          availableModels
-        });
-      }
-    }
-    
-    // ISSUE 6 FIX: Validate notification email if provided
-    // This email is used to send failure/approval notifications for local tasks
-    // (which don't have ClickUp assignees to extract email from)
-    let validatedNotificationEmail: string | undefined;
-    if (notificationEmail && typeof notificationEmail === 'string') {
-      const trimmedEmail = notificationEmail.trim();
-      // Basic email validation pattern
-      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (trimmedEmail && !emailPattern.test(trimmedEmail)) {
-        return res.status(400).json({ 
-          error: 'Invalid notification email format'
-        });
-      }
-      validatedNotificationEmail = trimmedEmail || undefined;
-    }
-    
-    // Find the client folder
-    const githubCloneAllDir = path.resolve(config.git.githubCloneAllDir || '');
-    let clientFolder = path.join(githubCloneAllDir, normalizedClientName);
-    
-    // Also check in client-websites subdirectory
-    const clientWebsitesPath = path.join(githubCloneAllDir, 'client-websites', normalizedClientName);
-    if (await fs.pathExists(clientWebsitesPath)) {
-      clientFolder = clientWebsitesPath;
-    }
-    
-    // Check if client folder exists
-    if (!await fs.pathExists(clientFolder)) {
-      return res.status(404).json({ 
-        error: `Client folder not found: ${normalizedClientName}`,
-        suggestion: 'Create a client folder first or import a task from ClickUp.'
-      });
-    }
-    
-    // Generate unique local task ID with retry for collision handling
-    const crypto = await import('crypto');
-    let taskId: string;
-    let taskFolder: string;
-    let attempts = 0;
-    const maxAttempts = 3;
-    
-    do {
-      const randomBytes = crypto.randomBytes(3).toString('hex');
-      taskId = `local-${Date.now()}-${randomBytes}`;
-      taskFolder = path.join(clientFolder, '.clickup-workflow', taskId);
-      attempts++;
-      
-      // Check for collision (extremely unlikely but handle gracefully)
-      if (await fs.pathExists(taskFolder)) {
-        logger.warn(`Task ID collision detected: ${taskId}, retrying...`);
-        if (attempts >= maxAttempts) {
-          return res.status(409).json({ 
-            error: 'Failed to generate unique task ID. Please try again.' 
-          });
-        }
-        // Small delay before retry
-        await new Promise(resolve => setTimeout(resolve, 10));
-      } else {
-        break;
-      }
-    } while (attempts < maxAttempts);
-    
-    // Create minimal ClickUpTask object for local tasks
-    const timestamp = new Date().toISOString();
-    const localTask: ClickUpTask = {
-      id: taskId,
-      name: trimmedTitle,
-      description: trimmedDescription,
-      status: {
-        status: 'pending',
-        color: '#d3d3d3',
-        type: 'open'
-      },
-      url: '#', // Placeholder - no ClickUp link
-      assignees: []
-    };
-    
-    // Import state management functions
-    const { saveTaskInfo, updateWorkflowState, WorkflowState: WfState } = await import('./state/stateManager');
-    
-    // Create TaskInfo object
-    const taskInfo: TaskInfo = {
-      task: localTask,
-      taskId: taskId,
-      clientName: normalizedClientName,
-      clientFolder: clientFolder,
-      model: model || config.cursor.defaultModel,
-      // ISSUE 6 FIX: Include notification email for local tasks
-      notificationEmail: validatedNotificationEmail
-    };
-    
-    // Save task info
-    await saveTaskInfo(clientFolder, taskId, taskInfo);
-    
-    // Initialize workflow state as PENDING
-    await updateWorkflowState(clientFolder, taskId, WfState.PENDING, {
-      isLocalTask: true,
-      createdVia: 'dashboard',
-      createdAt: timestamp
-    });
-    
-    // ISSUE 4 FIX: Initialize development branch for local tasks
-    // Without this, continueWorkflowAfterAgent will fail with "branch name missing" error
-    // because local tasks bypass the processTask() workflow that normally sets up the branch
-    const { ensureDevBranch } = await import('./git/branchManager');
-    const { saveTaskState } = await import('./state/stateManager');
-    
-    let branchName: string | undefined;
-    try {
-      branchName = await ensureDevBranch(clientFolder);
-      await saveTaskState(clientFolder, taskId, { branchName });
-      logger.info(`Initialized branch ${branchName} for local task ${taskId}`);
-    } catch (branchError: any) {
-      logger.warn(`Could not initialize branch for local task ${taskId}: ${branchError.message}. Branch will be set when agent starts.`);
-      // Don't fail task creation - the agent workflow can still attempt to create the branch later
-    }
-    
-    // Generate CURSOR_TASK.md prompt file so agent has instructions when triggered
-    const { generatePromptFile } = await import('./cursor/promptGenerator');
-    const promptPath = await generatePromptFile(
-      clientFolder,
-      normalizedClientName,
-      localTask,
-      branchName, // ISSUE 4 FIX: Pass the initialized branch name
-      undefined  // testCommand - will be detected when agent runs
-    );
-    
-    // If custom system prompt is provided, overwrite the generated prompt file
-    if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim().length > 0) {
-      const trimmedSystemPrompt = systemPrompt.trim();
-      await fs.writeFile(promptPath, trimmedSystemPrompt, 'utf-8');
-      logger.info(`Custom system prompt saved for task ${taskId} at ${promptPath}`);
-    }
-    
-    logger.info(`Created local task ${taskId} for client ${normalizedClientName}${validatedNotificationEmail ? ` (notifications: ${validatedNotificationEmail})` : ' (no notification email)'}`);
-    
-    res.json({
-      success: true,
-      taskId,
-      taskName: trimmedTitle,
-      clientName: normalizedClientName,
-      clientFolder,
-      branchName: branchName || undefined,
-      // ISSUE 6 FIX: Include notification info in response so caller knows if notifications are configured
-      notificationEmail: validatedNotificationEmail || null,
-      notificationConfigured: !!(validatedNotificationEmail || process.env.APPROVAL_EMAIL_TO),
-      message: 'Local task created successfully'
-    });
-    
+
+    // Remove internal-only field before sending response
+    const { statusCode: _sc, ...responseBody } = result;
+    res.json(responseBody);
   } catch (error: any) {
     logger.error(`Error creating local task: ${error.message}`);
     res.status(500).json({ error: error.message });
@@ -2223,15 +2029,10 @@ app.post('/api/tasks/import', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'taskId is required' });
     }
 
-    // Validate model if provided
-    if (model && typeof model === 'string') {
-      const availableModels = config.cursor.availableModels || [];
-      if (!availableModels.includes(model)) {
-        return res.status(400).json({ 
-          error: `Invalid model: ${model}`,
-          availableModels
-        });
-      }
+    // Validate model if provided (shared utility)
+    const modelCheck = validateModel(model);
+    if (!modelCheck.valid) {
+      return res.status(400).json({ error: modelCheck.error, availableModels: modelCheck.availableModels });
     }
 
     const result = await importTask({
@@ -3165,16 +2966,14 @@ app.post('/api/tasks/:taskId/trigger-agent', async (req: Request, res: Response)
     const { model } = req.body;
     logger.info(`Manual trigger request for Cursor agent: task ${taskId}${model ? ` with model ${model}` : ''}`);
 
-    // Validate model if provided
-    if (model && typeof model === 'string') {
-      const availableModels = config.cursor.availableModels || [];
-      if (!availableModels.includes(model)) {
-        return res.status(400).json({ 
-          error: `Invalid model: ${model}`,
-          message: `Available models: ${availableModels.join(', ')}`,
-          availableModels
-        });
-      }
+    // Validate model if provided (shared utility)
+    const modelCheck = validateModel(model);
+    if (!modelCheck.valid) {
+      return res.status(400).json({
+        error: modelCheck.error,
+        message: `Available models: ${(modelCheck.availableModels || []).join(', ')}`,
+        availableModels: modelCheck.availableModels,
+      });
     }
 
     const { findTaskById } = await import('./utils/taskScanner');
@@ -3192,44 +2991,27 @@ app.post('/api/tasks/:taskId/trigger-agent', async (req: Request, res: Response)
 
     res.json({ success: true, message: 'Cursor agent triggered successfully' });
   } catch (error: any) {
-    // Check for credit limit errors - return specific status code for frontend handling
-    if (error.creditError || error.errorCategory === 'credit_limit') {
-      logger.error(`Credit limit error for task ${req.params.taskId}: ${error.message}`);
-      return res.status(402).json({
-        success: false,
-        error: 'AI credits exhausted',
-        creditError: true,
-        errorCategory: 'credit_limit',
-        userMessage: 'Your Cursor AI credits have been exhausted. Please wait for credits to reset or upgrade your plan.',
-        retryable: true,
-        retryAfterMinutes: 60
-      });
-    }
-    
-    // Check for model-specific errors
-    if (error.modelError) {
-      return res.status(422).json({
-        success: false,
-        error: 'Model unavailable',
-        modelError: true,
-        failedModel: error.failedModel,
-        availableModels: config.cursor.availableModels,
-        userMessage: `The model "${error.failedModel}" is not available. Please select a different model.`
-      });
-    }
-    
-    // Check for auth errors
-    if (error.errorCategory === 'auth_error') {
-      return res.status(401).json({
-        success: false,
-        error: 'Authentication failed',
-        errorCategory: 'auth_error',
-        userMessage: 'AI agent authentication failed. Please re-authenticate cursor-agent.'
-      });
-    }
-    
-    logger.error(`Error triggering agent for task ${req.params.taskId}: ${error.message}`);
-    res.status(500).json({ error: error.message });
+    // Phase 4.2: Use centralized error categorization
+    const { categorizeError } = await import('./utils/errorCategorizer');
+    const categorized = categorizeError(error);
+
+    const statusCodeMap: Record<string, number> = {
+      credit_limit: 402,
+      model_error: 422,
+      auth_error: 401,
+    };
+    const statusCode = statusCodeMap[categorized.errorCategory] || 500;
+
+    logger.error(`Error triggering agent for task ${req.params.taskId} [${categorized.errorCategory}]: ${error.message}`);
+
+    res.status(statusCode).json({
+      success: false,
+      ...categorized,
+      // Provide extra context for model errors
+      ...(categorized.modelError ? { availableModels: config.cursor.availableModels } : {}),
+      // Provide retry hint for credit errors
+      ...(categorized.creditError ? { retryable: true, retryAfterMinutes: 60 } : {}),
+    });
   }
 });
 

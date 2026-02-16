@@ -244,34 +244,36 @@ export interface TriggerCursorAgentOptions {
 }
 
 /**
- * Triggers Cursor agent to process the task
+ * Shared pre-trigger logic used by both triggerCursorAgent (after queue claim)
+ * and processNextQueuedTask (after queue auto-claim).
+ *
+ * Handles: status reset, demo guard, directory setup, pending feedback,
+ * workflow state update to IN_PROGRESS, agent trigger, and completion detection start.
  */
-export async function triggerCursorAgent(
+export async function launchAgentForTask(
   clientFolder: string,
   task: ClickUpTask,
+  branchName: string,
   options?: TriggerCursorAgentOptions
 ): Promise<void> {
   const { triggerAgent } = await import('./agentTrigger');
-  const { updateWorkflowState, WorkflowState, loadTaskState } = await import('../state/stateManager');
+  const { updateWorkflowState, WorkflowState } = await import('../state/stateManager');
   const { taskStatusManager } = await import('./taskStatusManager');
-  const { agentQueue } = await import('./agentQueue');
-  
-  logger.info(`Triggering Cursor agent for task: ${task.id}`);
 
-  // 0. RESET: Clear any stale status file from previous runs
+  // 1. RESET: Clear any stale status file from previous runs
   try {
     await taskStatusManager.resetStatus(task.id, clientFolder);
   } catch (resetErr) {
     logger.warn(`Failed to reset status for task ${task.id}: ${resetErr}`);
   }
 
-  // 1. Guard against triggering agent while demo is still being prepared
+  // 2. Guard against triggering agent while demo is still being prepared
   try {
     const demoStatusPath = path.join(clientFolder, 'demo.status.json');
     if (await fs.pathExists(demoStatusPath)) {
       const status = await fs.readJson(demoStatusPath);
       const { isDemoInActiveCreation } = await import('../handlers/demoHandler');
-      
+
       // If the demo is in an active creation state, and we ARE NOT the one triggering it
       // (i.e. the state is not 'triggering' which is what demoHandler sets before calling us),
       // then we should block this manual/external trigger.
@@ -288,11 +290,11 @@ export async function triggerCursorAgent(
     // Ignore other errors (e.g. status file read errors) and proceed
   }
 
-  // 2. Initial setup for status reporting
+  // 3. Initial setup for status reporting
   try {
     await fs.ensureDir(path.join(clientFolder, '.cursor', 'status'));
     await fs.ensureDir(path.join(clientFolder, '.cursor', 'status', 'tmp'));
-    
+
     await taskStatusManager.updateStatus(task.id, {
       state: 'STARTING',
       step: 'Initializing agent flow',
@@ -302,82 +304,51 @@ export async function triggerCursorAgent(
     logger.warn(`Initial setup failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 2. Queueing logic
-  await agentQueue.initialize();
-
-  let branchName = 'main';
+  // 4. Apply any pending agent feedback before triggering
   try {
-    const state = await loadTaskState(clientFolder, task.id);
-    branchName = state?.branchName || 'main';
-  } catch (error) {
-    logger.warn(`Could not load state for task ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-
-  const triggerMode = config.cursor.triggerMode || 'queue';
-  
-  if (triggerMode === 'queue') {
-    try {
-      const potentialRunningPath = path.join(clientFolder, '.cursor', 'running', `_${task.id}.md`);
-      await agentQueue.validateTaskCreation(potentialRunningPath);
-
-      await agentQueue.enqueueTask(task, clientFolder, branchName);
-      logger.info(`Task ${task.id} enqueued in .cursor/queue/`);
-      
-      await taskStatusManager.updateStatus(task.id, {
-        step: 'Initializing (Waiting for Queue)',
-        percent: 50
-      }, clientFolder);
-
-      // Attempt to claim immediately, prioritizing this task if the agent is free
-      const claimed = await agentQueue.claimNextTask(task.id);
-      
-      if (!claimed || claimed.metadata.taskId !== task.id) {
-        const msg = claimed 
-          ? `Task ${task.id} enqueued but another task (${claimed.metadata.taskId}) took precedence.`
-          : `Task ${task.id} enqueued and is waiting for the agent to become available.`;
-        logger.info(msg);
-        
-        await taskStatusManager.updateStatus(task.id, {
-          state: 'STARTING',
-          step: 'Queued',
-          percent: 50,
-          notes: msg
-        }, clientFolder);
-        return; 
-      }
-    } catch (error: any) {
-      logger.error(`Task Lifecycle Error: ${error.message}`);
-      await taskStatusManager.updateStatus(task.id, {
-        state: 'FAILED',
-        error: error.message
-      }, clientFolder);
-      return;
+    const appliedIds = await applyPendingAgentFeedback(clientFolder, task.id);
+    if (appliedIds.length > 0) {
+      logger.info(`Applied ${appliedIds.length} pending feedback item(s) for task ${task.id}`);
     }
+  } catch (feedbackErr: any) {
+    logger.warn(`Could not apply pending feedback for task ${task.id}: ${feedbackErr.message}`);
+    // Continue even if feedback application fails
   }
 
-  // 3. Trigger the agent
+  // 5. Phase 4.3: Ensure local tasks get the same workspace prep as ClickUp tasks.
+  //    ClickUp tasks go through processTask() which calls prepareWorkspace(), but
+  //    local tasks (from /api/tasks/create) only get branch creation + prompt generation.
+  //    We check for a baseCommitHash in state — if missing, workspace prep hasn't run.
+  try {
+    const { loadTaskState: loadState } = await import('../state/stateManager');
+    const currentState = await loadState(clientFolder, task.id);
+
+    if (!currentState?.baseCommitHash) {
+      logger.info(`Task ${task.id} missing baseCommitHash — running workspace prep (local task preflight)`);
+      await prepareWorkspace(clientFolder, task, branchName);
+      logger.info(`Workspace prep completed for local task ${task.id}`);
+    }
+  } catch (prepErr: any) {
+    logger.warn(`Workspace prep for task ${task.id} failed: ${prepErr.message}. Continuing anyway.`);
+  }
+
+  // 6. Update status and workflow state to IN_PROGRESS
   const promptPath = path.join(clientFolder, 'CURSOR_TASK.md');
-  
+
   await taskStatusManager.updateStatus(task.id, {
     step: 'Starting Agent',
     percent: 80
   }, clientFolder);
 
-  // CRITICAL: Update workflow state to IN_PROGRESS so frontend shows correct status
-  // This is the authoritative state stored in .clickup-workflow/{taskId}/state.json
-  try {
-    await updateWorkflowState(clientFolder, task.id, WorkflowState.IN_PROGRESS, undefined, 'Agent starting...');
-    logger.info(`Updated task ${task.id} workflow state to IN_PROGRESS`);
-  } catch (stateErr) {
-    logger.warn(`Failed to update workflow state for task ${task.id}: ${stateErr}`);
-    // Continue anyway - the agent can still run
-  }
+  // Phase 4.4: MANDATORY — update workflow state to IN_PROGRESS before agent launch.
+  // If this fails, the task is in an indeterminate state and we must abort.
+  await updateWorkflowState(clientFolder, task.id, WorkflowState.IN_PROGRESS, undefined, 'Agent starting...');
+  logger.info(`Updated task ${task.id} workflow state to IN_PROGRESS`);
 
+  // 6. Trigger the agent (non-blocking) and start completion detection
   try {
-    // triggerAgent is internally non-blocking
     await triggerAgent(clientFolder, promptPath, task, { model: options?.model });
-    
-    // 4. Start completion detection
+
     if (config.cursor.agentCompletionDetection?.enabled) {
       const { startCompletionDetection } = await import('./agentCompletionDetector');
       await startCompletionDetection(clientFolder, task.id, branchName);
@@ -390,6 +361,96 @@ export async function triggerCursorAgent(
     }, clientFolder);
     throw error;
   }
+}
+
+/**
+ * Triggers Cursor agent to process the task.
+ * Handles queue logic, deduplication, and delegates to launchAgentForTask.
+ */
+export async function triggerCursorAgent(
+  clientFolder: string,
+  task: ClickUpTask,
+  options?: TriggerCursorAgentOptions
+): Promise<void> {
+  const { loadTaskState } = await import('../state/stateManager');
+  const { taskStatusManager } = await import('./taskStatusManager');
+  const { agentQueue } = await import('./agentQueue');
+
+  logger.info(`Triggering Cursor agent for task: ${task.id}`);
+
+  // Resolve branch name for queue metadata
+  let branchName = 'main';
+  try {
+    const state = await loadTaskState(clientFolder, task.id);
+    branchName = state?.branchName || 'main';
+  } catch (error) {
+    logger.warn(`Could not load state for task ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // Queueing logic
+  await agentQueue.initialize();
+
+  const triggerMode = config.cursor.triggerMode || 'queue';
+
+  if (triggerMode === 'queue') {
+    // FIX 3.1: Prevent duplicate enqueue — check if task is already queued or running
+    const alreadyQueued = await agentQueue.isTaskQueued(task.id);
+    const alreadyRunning = await agentQueue.isTaskRunning(task.id);
+
+    if (alreadyQueued) {
+      const msg = `Task ${task.id} is already queued. Skipping duplicate enqueue.`;
+      logger.info(msg);
+      return;
+    }
+    if (alreadyRunning) {
+      const msg = `Task ${task.id} is already running. Skipping duplicate trigger.`;
+      logger.info(msg);
+      return;
+    }
+
+    try {
+      const potentialRunningPath = path.join(clientFolder, '.cursor', 'running', `_${task.id}.md`);
+      await agentQueue.validateTaskCreation(potentialRunningPath);
+
+      await agentQueue.enqueueTask(task, clientFolder, branchName);
+      logger.info(`Task ${task.id} enqueued in .cursor/queue/`);
+
+      await taskStatusManager.updateStatus(task.id, {
+        step: 'Initializing (Waiting for Queue)',
+        percent: 50
+      }, clientFolder);
+
+      // Attempt to claim immediately, prioritizing this task if the agent is free
+      const claimed = await agentQueue.claimNextTask(task.id);
+
+      if (!claimed || claimed.metadata.taskId !== task.id) {
+        const msg = claimed
+          ? `Task ${task.id} enqueued but another task (${claimed.metadata.taskId}) took precedence.`
+          : `Task ${task.id} enqueued and is waiting for the agent to become available.`;
+        logger.info(msg);
+
+        await taskStatusManager.updateStatus(task.id, {
+          state: 'STARTING',
+          step: 'Queued',
+          percent: 50,
+          notes: msg
+        }, clientFolder);
+        return;
+      }
+    } catch (error: any) {
+      // FIX 3.3: Re-throw queue errors so the HTTP endpoint can return a proper error
+      // instead of silently returning and letting the endpoint respond with { success: true }.
+      logger.error(`Task Lifecycle Error: ${error.message}`);
+      await taskStatusManager.updateStatus(task.id, {
+        state: 'FAILED',
+        error: error.message
+      }, clientFolder);
+      throw error;
+    }
+  }
+
+  // Delegate to shared pre-trigger + trigger + detection logic
+  await launchAgentForTask(clientFolder, task, branchName, options);
 }
 
 /**

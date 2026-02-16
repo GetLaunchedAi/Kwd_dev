@@ -24,6 +24,11 @@ const activePolling = new Map<string, PollingState>();
  * CRITICAL: Process the next task in the queue after one completes.
  * This is the missing link that enables sequential queue processing.
  * 
+ * FIX 3.2: Now uses launchAgentForTask (shared with triggerCursorAgent) so that
+ * queued tasks get the same pre-trigger treatment: status reset, demo guard,
+ * directory setup, pending feedback, IN_PROGRESS state update, and completion
+ * detection — instead of calling triggerAgent directly and skipping those steps.
+ * 
  * @param depth - Internal recursion depth counter to prevent infinite loops
  */
 export async function processNextQueuedTask(depth: number = 0): Promise<void> {
@@ -62,10 +67,6 @@ export async function processNextQueuedTask(depth: number = 0): Promise<void> {
     
     logger.info(`Claimed task ${claimed.metadata.taskId} from queue. Starting agent...`);
     
-    // Trigger the agent for this task
-    const { triggerAgent } = await import('./agentTrigger');
-    const promptPath = path.join(claimed.metadata.clientFolder, 'CURSOR_TASK.md');
-    
     // We need to get the task info from the task state
     const { loadTaskInfo } = await import('../state/stateManager');
     const taskInfo = await loadTaskInfo(claimed.metadata.clientFolder, claimed.metadata.taskId);
@@ -78,29 +79,15 @@ export async function processNextQueuedTask(depth: number = 0): Promise<void> {
       return;
     }
     
-    // Apply any pending agent feedback before triggering
-    try {
-      const { applyPendingAgentFeedback } = await import('./workspaceManager');
-      const appliedIds = await applyPendingAgentFeedback(claimed.metadata.clientFolder, claimed.metadata.taskId);
-      if (appliedIds.length > 0) {
-        logger.info(`Applied ${appliedIds.length} pending feedback item(s) for task ${claimed.metadata.taskId}`);
-      }
-    } catch (feedbackErr: any) {
-      logger.warn(`Could not apply pending feedback for task ${claimed.metadata.taskId}: ${feedbackErr.message}`);
-      // Continue even if feedback application fails
-    }
-    
-    // Trigger the agent
-    await triggerAgent(claimed.metadata.clientFolder, promptPath, taskInfo.task);
-    
-    // Start completion detection for this task
-    if (config.cursor.agentCompletionDetection?.enabled) {
-      await startCompletionDetection(
-        claimed.metadata.clientFolder, 
-        claimed.metadata.taskId, 
-        claimed.metadata.branch || 'main'
-      );
-    }
+    // FIX 3.2: Delegate to the shared launchAgentForTask which handles
+    // status reset, demo guard, directory setup, pending feedback,
+    // IN_PROGRESS state update, agent trigger, and completion detection.
+    const { launchAgentForTask } = await import('./workspaceManager');
+    await launchAgentForTask(
+      claimed.metadata.clientFolder,
+      taskInfo.task,
+      claimed.metadata.branch || 'main'
+    );
     
     logger.info(`Successfully started processing queued task ${claimed.metadata.taskId}`);
     
@@ -390,7 +377,14 @@ async function pollForCompletion(
 }
 
 /**
- * Handles completion detection - continues workflow
+ * Handles completion detection - continues workflow.
+ *
+ * DUAL COMPLETION DETECTION (Phase 3.5 documentation):
+ * This function is called by the polling-based completion detector (safety net path).
+ * The runner exit handler in agentTrigger.ts is the primary completion path.
+ * The workflow orchestrator's lock prevents duplicate execution; if the runner
+ * already called continueWorkflowAfterAgent, this call will be deduplicated and
+ * a log message will be emitted by the orchestrator.
  */
 async function handleCompletion(
   clientFolder: string,

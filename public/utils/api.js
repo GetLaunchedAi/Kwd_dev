@@ -40,6 +40,7 @@ class ApiClient {
                     
                     const error = new Error(errorData.error || `HTTP error! status: ${response.status}`);
                     error.status = response.status;
+                    error.data = errorData; // Preserve full structured response for callers
                     
                     // Don't retry on 4xx errors (client errors) - throw immediately without retry
                     if (response.status >= 400 && response.status < 500) {

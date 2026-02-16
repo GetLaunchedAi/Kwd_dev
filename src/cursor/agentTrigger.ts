@@ -1,13 +1,9 @@
-import { spawn } from 'child_process';
 import * as path from 'path';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { ClickUpTask } from '../clickup/apiClient';
+import { categorizeError } from '../utils/errorCategorizer';
 import * as fse from 'fs-extra';
-
-const execAsync = promisify(exec);
 
 export interface AgentTriggerOptions {
   model?: string;
@@ -131,7 +127,25 @@ async function markDemoStepAsFailed(
 }
 
 /**
- * Attempts to trigger Cursor agent programmatically
+ * Attempts to trigger Cursor agent programmatically.
+ *
+ * DUAL COMPLETION DETECTION (Phase 3.5 documentation):
+ * There are two independent paths that can detect agent completion and call
+ * continueWorkflowAfterAgent():
+ *
+ *   1. **Runner exit handler (PRIMARY)**: When the CursorCliRunner process exits
+ *      (see runPromise below), the .then() handler calls continueWorkflowAfterAgent
+ *      immediately. This is the fast, reliable path for normal execution.
+ *
+ *   2. **Polling-based agentCompletionDetector (SAFETY NET)**: Started by the
+ *      caller (triggerCursorAgent / launchAgentForTask) after this function returns.
+ *      It polls .cursor/status/current.json and heartbeat timestamps. If the runner
+ *      exit handler fails (e.g. process crash without exit event), the detector
+ *      catches it via stale-heartbeat detection.
+ *
+ * The workflow orchestrator's lock mechanism prevents duplicate execution if both
+ * paths fire. When the detector's call is deduplicated, a log message is emitted
+ * so operators can confirm the safety net is working as intended.
  */
 export async function triggerAgent(
   clientFolder: string,
@@ -139,17 +153,12 @@ export async function triggerAgent(
   task: ClickUpTask,
   options?: AgentTriggerOptions
 ): Promise<void> {
-    const triggerMode = config.cursor.triggerMode || 'queue';
-    const method = config.cursor.agentTriggerMethod || 'file';
-    
-    
     // ALWAYS use CLI runner for autonomous execution to ensure tasks actually run
     // instead of idling in the editor.
     const { CursorCliRunner } = await import('./runner');
     const fs = await import('fs-extra');
     
     logger.info(`Triggering autonomous execution for task ${task.id} in ${clientFolder}`);
-    logger.info(`Trigger mode: ${triggerMode}, Method: ${method}`);
     
     let prompt = '';
     try {
@@ -192,34 +201,26 @@ export async function triggerAgent(
           logger.error(`Task ${task.id} failed via autonomous runner with code ${result.exitCode}.`);
           const { updateWorkflowState, WorkflowState } = await import('../state/stateManager');
           
-          // Build detailed error info for the state
+          // Phase 4.2: Use centralized error categorization
+          const categorized = categorizeError({
+            message: result.error || `Process exited with code ${result.exitCode}`,
+            creditError: result.creditError,
+            modelError: result.modelError,
+            failedModel: result.failedModel,
+          });
           const errorInfo: Record<string, any> = {
-            error: result.error || `Process exited with code ${result.exitCode}`,
-            exitCode: result.exitCode
+            ...categorized,
+            exitCode: result.exitCode,
           };
-          
-          // Determine error category for recovery
-          let errorCategory = result.errorCategory || 'unknown';
-          let userMessage = result.error || `Agent exited with code ${result.exitCode}`;
-          
-          // Add categorized error info for frontend handling
-          if (result.creditError) {
-            errorInfo.creditError = true;
-            errorInfo.errorCategory = 'credit_limit';
-            errorCategory = 'credit_limit';
-            userMessage = 'AI credits have been exhausted. Please wait for credits to reset or upgrade your Cursor plan.';
-            errorInfo.userMessage = userMessage;
-            logger.error(`[CREDIT EXHAUSTED] Task ${task.id} failed due to credit limit`);
-          } else if (result.modelError) {
-            errorInfo.modelError = true;
-            errorInfo.failedModel = result.failedModel;
-            errorInfo.errorCategory = 'model_error';
-            errorCategory = 'model_error';
-            userMessage = `The AI model "${result.failedModel || 'selected'}" is unavailable. Try a different model.`;
-            errorInfo.userMessage = userMessage;
-          } else if (result.errorCategory) {
+          // Preserve explicit runner category when categorizer returns 'unknown'
+          if (categorized.errorCategory === 'unknown' && result.errorCategory) {
             errorInfo.errorCategory = result.errorCategory;
-            errorCategory = result.errorCategory;
+          }
+          const errorCategory = errorInfo.errorCategory || 'unknown';
+          const userMessage = categorized.userMessage || result.error || `Agent exited with code ${result.exitCode}`;
+
+          if (categorized.creditError) {
+            logger.error(`[CREDIT EXHAUSTED] Task ${task.id} failed due to credit limit`);
           }
           
           await updateWorkflowState(clientFolder, task.id, WorkflowState.ERROR, errorInfo);
@@ -262,72 +263,6 @@ export async function triggerAgent(
     return;
 }
 
-/**
- * Verifies that Cursor is open for the given workspace
- */
-async function verifyCursorWorkspace(clientFolder: string): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq Cursor.exe" /NH');
-      if (!stdout.includes('Cursor.exe')) {
-        logger.warn('Cursor process not found. It should be running to process the queue.');
-      } else {
-        logger.info('Cursor process verified as running.');
-      }
-    }
-    // On other platforms, we just assume it's running or let the openCursorWorkspace handle it
-  } catch (error) {
-    logger.warn('Could not verify Cursor process state');
-  }
-}
-
-/**
- * Creates task file - agent will pick it up automatically (file-based trigger)
- * This is the fallback/rollback method for UI mode.
- */
-async function triggerViaFile(workspaceDir: string, taskFilePath: string): Promise<void> {
-  logger.info(`Task file available at ${taskFilePath}`);
-  
-  // Load the .cursorrules template
-  const templatePath = path.join(__dirname, 'cursorrules.template.md');
-  let cursorRulesContent: string;
-  
-  try {
-    cursorRulesContent = await fse.readFile(templatePath, 'utf-8');
-    logger.info(`Loaded .cursorrules template from ${templatePath}`);
-  } catch (error) {
-    // Fallback to inline content if template file not found
-    logger.warn(`Could not load .cursorrules template, using inline version`);
-    cursorRulesContent = `# Single-Shot Agent Protocol
-
-You are an automated Cursor agent. You are invoked to handle exactly one task and then exit.
-
-## Task Initialization
-- **Read Instructions**: Immediately read the \`CURSOR_TASK.md\` file in this directory (${taskFilePath}).
-- Follow ALL instructions in that file carefully.
-
-## Execution
-1. Implement the requested changes
-2. Test your changes if a test command is provided
-3. Update .cursor/status/current.json with your progress
-4. Commit changes with message format: task: [taskId] description
-5. EXIT immediately when done
-
----
-Generated: ${new Date().toISOString()}
-`;
-  }
-  
-  // Create/update .cursorrules to direct the agent to the task file
-  const cursorRulesPath = path.join(workspaceDir, '.cursorrules');
-  
-  try {
-    await fse.writeFile(cursorRulesPath, cursorRulesContent, 'utf-8');
-    logger.info(`Updated .cursorrules file at ${cursorRulesPath}`);
-    
-  } catch (error: any) {
-    logger.warn(`Could not update .cursorrules file: ${error.message}`);
-  }
-  
-  logger.info('NOTE: Open Cursor Composer (Ctrl+I) to trigger the agent to process the task.');
-}
+// Dead code removed (Phase 3.4):
+// - verifyCursorWorkspace: never called externally; Cursor process check was informational only
+// - triggerViaFile: legacy file-based trigger; system always uses CursorCliRunner

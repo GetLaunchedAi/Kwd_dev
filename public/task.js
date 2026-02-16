@@ -1551,17 +1551,7 @@ async function handleTriggerAgent() {
     }
     
     try {
-        // Status updates for better UX
-        const updateStatus = (text, delay) => new Promise(resolve => {
-            setTimeout(() => resolve(), delay);
-        });
-
-        const triggerPromise = api.post(`/tasks/${taskId}/trigger-agent`, { model: selectedModel });
-        
-        await updateStatus('Claiming task & preparing workspace...', 500);
-        await updateStatus('Starting single-shot agent...', 1000);
-        
-        const response = await triggerPromise;
+        const response = await api.post(`/tasks/${taskId}/trigger-agent`, { model: selectedModel });
         
         // Handle model error response
         if (response.modelError) {
